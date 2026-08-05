@@ -31,14 +31,16 @@ const RateLimitResetCreditsSchema = z
 
 export const ProviderRateLimitsSchema = z
   .object({
+    // Why: an older paired host still publishes retired providers; rejecting them
+    // here would fail the whole usage snapshot instead of one unused entry.
     provider: z.enum([
       'claude',
       'codex',
-      'gemini',
       'opencode-go',
       'kimi',
       'minimax',
       'grok',
+      'gemini',
       'antigravity'
     ]),
     session: RateLimitWindowSchema.nullable(),

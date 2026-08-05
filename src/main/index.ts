@@ -2443,7 +2443,6 @@ void app.whenReady().then(async () => {
       models: settings.minimaxUsageModels
     }
   })
-  rateLimits.setGeminiCliOAuthEnabledResolver(() => store!.getSettings().geminiCliOAuthEnabled)
   rateLimits.setNetworkProxySettingsResolver(() => store!.getSettings())
   keybindings = new KeybindingService({
     homePath: app.getPath('home'),

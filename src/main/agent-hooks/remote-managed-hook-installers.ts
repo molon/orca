@@ -3,7 +3,6 @@ import type { AgentHookInstallStatus, AgentHookTarget } from '../../shared/agent
 import { ampHookService } from '../amp/hook-service'
 import { claudeHookService } from '../claude/hook-service'
 import { codexHookService } from '../codex/hook-service'
-import { geminiHookService } from '../gemini/hook-service'
 import { antigravityHookService } from '../antigravity/hook-service'
 import { cursorHookService } from '../cursor/hook-service'
 import { commandCodeHookService } from '../command-code/hook-service'
@@ -54,7 +53,6 @@ const REMOTE_MANAGED_HOOK_INSTALLERS: readonly RemoteManagedHookInstaller[] = [
           : undefined
       )
   ],
-  ['gemini', (sftp, remoteHome) => geminiHookService.installRemote(sftp, remoteHome)],
   ['antigravity', (sftp, remoteHome) => antigravityHookService.installRemote(sftp, remoteHome)],
   ['amp', (sftp, remoteHome) => ampHookService.installRemote(sftp, remoteHome)],
   ['cursor', (sftp, remoteHome) => cursorHookService.installRemote(sftp, remoteHome)],

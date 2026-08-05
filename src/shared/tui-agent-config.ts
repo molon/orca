@@ -156,12 +156,6 @@ export const TUI_AGENT_CONFIG: Record<TuiAgent, TuiAgentConfig> = {
     // Why: Prime Agent embeds Pi's TUI and decodes CSI-u the same way (see pi above).
     windowsShiftEnterEncoding: 'csi-u'
   },
-  gemini: {
-    detectCmd: 'gemini',
-    launchCmd: 'gemini',
-    expectedProcess: 'gemini',
-    promptInjectionMode: 'flag-prompt-interactive'
-  },
   antigravity: {
     detectCmd: 'agy',
     launchCmd: 'agy',

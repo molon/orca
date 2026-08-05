@@ -599,9 +599,9 @@ describe('AutomationService', () => {
     const store = await createStore()
     store.addRepo(makeRepo())
     const automation = store.createAutomation({
-      name: 'Gemini check',
+      name: 'Cursor check',
       prompt: 'Check spend',
-      agentId: 'gemini',
+      agentId: 'cursor',
       projectId: 'r1',
       workspaceMode: 'existing',
       workspaceId: 'wt1',
