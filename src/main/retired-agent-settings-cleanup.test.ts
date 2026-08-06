@@ -70,7 +70,7 @@ describe('cleanRetiredAgentReferences', () => {
     })
     expect(cleanRetiredAgentReferences(state)).toBe(true)
     const ai = state.settings.sourceControlAi as unknown as Record<string, unknown>
-    expect(ai).toMatchObject({
+    expect(ai).toEqual({
       agentId: null,
       selectedModelByAgent: { claude: 'opus' },
       selectedModelByAgentByHost: { 'ssh:box': {} },

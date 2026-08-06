@@ -11,7 +11,8 @@ export type TerminalGpuAccelerationMode = GlobalSettings['terminalGpuAcceleratio
 export type RendererPolicyDecision = {
   gpuEnabled: boolean
   reason: 'user-setting' | 'capability' | 'context-loss'
-  confidence: 'authoritative' | 'fallback'
+  // Why: the title-derived Gemini fallback was the only non-authoritative path.
+  confidence: 'authoritative'
 }
 
 export type ResolvePaneRendererPolicyInput = {

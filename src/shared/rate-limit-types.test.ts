@@ -22,7 +22,7 @@ describe('RateLimitState', () => {
       inactiveCodexAccounts: []
     }
 
-    expect(state.minimax).toBeNull()
+    expect(state.grok).toBeNull()
     expect(state.minimax).toBeNull()
     expect(state.minimaxCookieConfigured).toBe(false)
   })
