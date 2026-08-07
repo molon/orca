@@ -82,6 +82,9 @@ export async function installRemoteManagedAgentHooks(
   options?: RemoteManagedHookInstallOptions
 ): Promise<AgentHookInstallStatus[]> {
   // Why: strip retired Gemini CLI hooks on remote homes the same way as local.
+  // Aborted-first, like the per-agent installs below: no remote config mutation
+  // after the requesting client has gone away.
+  options?.signal?.throwIfAborted()
   try {
     await removeRetiredGeminiManagedHooksRemote(sftp, remoteHome)
   } catch (error) {

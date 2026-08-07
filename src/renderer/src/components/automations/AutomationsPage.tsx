@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { filterEnabledTuiAgents, isTuiAgentEnabled } from '../../../../shared/tui-agent-selection'
+import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
@@ -1515,8 +1516,9 @@ export default function AutomationsPage(): React.JSX.Element {
   }
 
   const toggleAutomation = async (automation: Automation): Promise<void> => {
-    // Why: resuming without an agent would only schedule runs that fail at dispatch.
-    if (!automation.enabled && !automation.agentId) {
+    // Why: resuming without a current agent (cleared or retired) would only
+    // schedule runs that fail at dispatch.
+    if (!automation.enabled && !isTuiAgent(automation.agentId)) {
       toast.error(AUTOMATION_MISSING_AGENT_MESSAGE)
       return
     }

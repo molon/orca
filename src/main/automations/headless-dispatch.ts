@@ -134,9 +134,15 @@ export async function requestHeadlessAutomationDispatch(args: {
             runId: run.id,
             status: 'dispatch_failed',
             ...launchRunTarget,
+            precheckResult,
             error: error instanceof Error ? error.message : String(error)
           })
         )
+        // Why: nothing awaits this chain, so a failing markDispatchResult would
+        // otherwise surface as an unhandled rejection.
+        .catch((error) => {
+          console.warn('[automations] Failed to persist headless dispatch result:', error)
+        })
     }
     return updated
   } catch (error) {

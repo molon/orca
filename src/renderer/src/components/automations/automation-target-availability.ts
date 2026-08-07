@@ -3,6 +3,7 @@ import {
   type Automation
 } from '../../../../shared/automations-types'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
+import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import {
   describeRuntimeCompatBlock,
   evaluateRuntimeCompat
@@ -71,7 +72,8 @@ export function getAutomationTargetAvailability({
   automationHostTarget,
   sourceHostAvailability
 }: AutomationTargetAvailabilityArgs): AutomationTargetAvailability {
-  if (!automation.agentId) {
+  // Why: a retired id persisted by an older host is truthy but unlaunchable.
+  if (!isTuiAgent(automation.agentId)) {
     return unavailable('missing-agent', AUTOMATION_MISSING_AGENT_MESSAGE)
   }
   if (!repo) {

@@ -7,8 +7,9 @@ const { homedirMock } = vi.hoisted(() => ({
   homedirMock: vi.fn<() => string>()
 }))
 
-vi.mock('os', async () => {
-  const actual = (await vi.importActual('os')) as Record<string, unknown>
+// Why: mock the exact specifier the cleanup imports; vitest keys mocks by specifier.
+vi.mock('node:os', async () => {
+  const actual = (await vi.importActual('node:os')) as Record<string, unknown>
   return {
     ...actual,
     homedir: homedirMock
