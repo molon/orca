@@ -31,8 +31,6 @@ const RateLimitResetCreditsSchema = z
 
 export const ProviderRateLimitsSchema = z
   .object({
-    // Why: an older paired host still publishes retired providers; rejecting them
-    // here would fail the whole usage snapshot instead of one unused entry.
     provider: z.enum([
       'claude',
       'codex',
@@ -40,6 +38,8 @@ export const ProviderRateLimitsSchema = z
       'kimi',
       'minimax',
       'grok',
+      // Why: an older paired host still publishes these retired providers;
+      // rejecting them would fail the whole snapshot over one unused entry.
       'gemini',
       'antigravity'
     ]),
