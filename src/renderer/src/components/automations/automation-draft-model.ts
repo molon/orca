@@ -1,4 +1,5 @@
 import { getAgentCatalog } from '@/lib/agent-catalog'
+import { translate } from '@/i18n/i18n'
 import type { AutomationPrecheck } from '../../../../shared/automations-types'
 import { buildAutomationCronSchedule } from '../../../../shared/automation-schedules'
 import type { Worktree } from '../../../../shared/types'
@@ -47,6 +48,10 @@ export function buildHermesCronSchedule(draft: AutomationDraft): string {
   })
 }
 
-export function getAgentLabel(agentId: string): string {
+export function getAgentLabel(agentId: string | null): string {
+  if (!agentId) {
+    // A retired-agent cleanup cleared it; the user has to pick a replacement.
+    return translate('auto.components.automations.automation.draft.model.a0f61bd7c9', 'No agent')
+  }
   return getAgentCatalog().find((agent) => agent.id === agentId)?.label ?? agentId
 }

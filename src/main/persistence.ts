@@ -5389,9 +5389,14 @@ export class Store {
     const dtstart = updates.dtstart ?? current.dtstart
     const scheduleChanged = updates.rrule !== undefined || updates.dtstart !== undefined
     const workspaceMode = updates.workspaceMode ?? current.workspaceMode
+    const agentId = updates.agentId ?? current.agentId
     const updated: Automation = {
       ...current,
       ...updates,
+      agentId,
+      // Why: an automation whose agent was retired has no agent to dispatch to,
+      // so it stays paused until the user picks a new one.
+      enabled: agentId !== null && (updates.enabled ?? current.enabled),
       name:
         updates.name !== undefined ? updates.name.trim() || 'Untitled automation' : current.name,
       precheck: Object.hasOwn(updates, 'precheck')

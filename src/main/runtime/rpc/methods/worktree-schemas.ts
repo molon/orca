@@ -15,15 +15,30 @@ import { TaskSourceContextSchema } from '../../../../shared/task-source-context-
 import { WorkspaceLinkedItemSchema } from '../../../../shared/workspace-linked-item-schema'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../../shared/workspace-linked-item-source-context'
 
+// Why: mixed client/host versions can still send retired ids (e.g. gemini).
+// Strip to undefined like createdWithAgent so worktree-create is not rejected.
 const OptionalTuiAgent = z
   .unknown()
-  .superRefine((value, ctx) => {
-    if (value !== undefined && !isTuiAgent(value)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unknown TUI agent' })
-    }
-  })
   .transform((value): TuiAgent | undefined => (isTuiAgent(value) ? value : undefined))
   .optional()
+
+/**
+ * Why: `startupPrompt` only travels with a `startupAgent`, so a stripped retired
+ * agent must take its prompt with it. Otherwise the leftover prompt trips the
+ * "startupPrompt requires startupAgent" refinement below and the create fails
+ * instead of degrading to a plain shell.
+ */
+function dropRetiredStartupAgentPair(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+  const params = value as Record<string, unknown>
+  if (params.startupAgent === undefined || isTuiAgent(params.startupAgent)) {
+    return value
+  }
+  const { startupAgent: _startupAgent, startupPrompt: _startupPrompt, ...rest } = params
+  return rest
+}
 
 const AutomationWorkspaceProvenanceRequest = z.object({
   automationId: z.string(),
@@ -97,7 +112,7 @@ function assertLinkedWorkItemSourceContextMatch(
   }
 }
 
-export const WorktreeCreate = z
+const WorktreeCreateParams = z
   .object({
     repo: z
       .unknown()
@@ -211,6 +226,8 @@ export const WorktreeCreate = z
       })
     }
   })
+
+export const WorktreeCreate = z.preprocess(dropRetiredStartupAgentPair, WorktreeCreateParams)
 
 export const WorktreePrefetchCreateBase = z.object({
   repo: z

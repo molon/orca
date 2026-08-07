@@ -1,158 +1,87 @@
 // Why: a removed agent id outlives its code inside saved profiles. Most readers
 // guard with isTuiAgent(), but `defaultTuiAgent` preselects the launch target
-// verbatim and Source Control AI copies its `agentId` into every action recipe
-// without validating it — both would point at an agent that no longer exists.
-// Scrub the profile once at the load boundary so no downstream reader has to.
+// verbatim, Source Control AI copies its `agentId` into every action recipe,
+// and automations dispatch with a raw agentId — all would point at an agent
+// that no longer exists. Scrub the profile once at the load boundary so no
+// downstream reader has to.
 
 import type { PersistedState } from '../shared/types'
 
 /** Agent ids Orca no longer ships. Keep an entry until profiles predating its removal are gone. */
-const RETIRED_TUI_AGENT_IDS: readonly string[] = ['gemini']
+const RETIRED_AGENTS: readonly unknown[] = ['gemini']
 
 /** Status-bar providers Orca no longer publishes usage for. */
-const RETIRED_STATUS_BAR_ITEM_IDS: readonly string[] = ['gemini', 'antigravity']
+const RETIRED_STATUS_BAR_ITEMS: readonly unknown[] = ['gemini', 'antigravity']
 
 /** GlobalSettings keys owned solely by a retired agent. */
-const RETIRED_SETTINGS_KEYS: readonly string[] = ['geminiCliOAuthEnabled']
+const RETIRED_KEYS: readonly string[] = ['geminiCliOAuthEnabled']
 
-type MutableRecord = Record<string, unknown>
+/** Single-agent fields. null reads as "fall back to the default" everywhere. */
+const AGENT_ID_KEYS: readonly string[] = ['agentId', 'defaultTuiAgent']
 
-function asRecord(value: unknown): MutableRecord | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as MutableRecord)
-    : null
+// Why: named explicitly rather than detected, so a repo, host, or worktree
+// literally called "gemini" is never mistaken for an agent-keyed map.
+const AGENT_KEYED_MAPS: readonly string[] = [
+  'agentCmdOverrides',
+  'agentDefaultArgs',
+  'agentDefaultEnv',
+  'selectedModelByAgent',
+  'discoveredModelsByAgent'
+]
+const AGENT_KEYED_MAPS_BY_HOST: readonly string[] = [
+  'selectedModelByAgentByHost',
+  'discoveredModelsByAgentByHost'
+]
+
+type Rec = Record<string, unknown>
+
+function asRecord(value: unknown): Rec | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Rec) : null
 }
 
-function isRetiredAgent(value: unknown): boolean {
-  return typeof value === 'string' && RETIRED_TUI_AGENT_IDS.includes(value)
-}
-
-/** Drops retired agent ids used as keys of an agent-keyed record. */
-function dropRetiredAgentKeys(value: unknown): boolean {
+function dropRetiredKeys(value: unknown): void {
   const record = asRecord(value)
-  if (!record) {
-    return false
+  for (const key of Object.keys(record ?? {})) {
+    if (RETIRED_AGENTS.includes(key)) {
+      delete record![key]
+    }
   }
-  let changed = false
-  for (const key of Object.keys(record)) {
-    if (isRetiredAgent(key)) {
+}
+
+/**
+ * One depth-first pass over the profile. Every shape that stores an agent id
+ * does it under one of the key names above, at some nesting depth that differs
+ * per shape (settings, per-repo overrides, action recipes, automations), so
+ * matching on the key rather than the path covers them all.
+ */
+function scrub(node: unknown): void {
+  if (Array.isArray(node)) {
+    node.forEach(scrub)
+    return
+  }
+  const record = asRecord(node)
+  if (!record) {
+    return
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (RETIRED_KEYS.includes(key)) {
       delete record[key]
-      changed = true
+    } else if (AGENT_ID_KEYS.includes(key) && RETIRED_AGENTS.includes(value)) {
+      record[key] = null
+    } else if (key === 'createdWithAgent' && RETIRED_AGENTS.includes(value)) {
+      delete record[key]
+    } else if (key === 'disabledTuiAgents' && Array.isArray(value)) {
+      record[key] = value.filter((agent) => !RETIRED_AGENTS.includes(agent))
+    } else if (key === 'statusBarItems' && Array.isArray(value)) {
+      record[key] = value.filter((item) => !RETIRED_STATUS_BAR_ITEMS.includes(item))
+    } else if (AGENT_KEYED_MAPS.includes(key)) {
+      dropRetiredKeys(value)
+    } else if (AGENT_KEYED_MAPS_BY_HOST.includes(key)) {
+      Object.values(asRecord(value) ?? {}).forEach(dropRetiredKeys)
+    } else {
+      scrub(value)
     }
   }
-  return changed
-}
-
-/** Same, one level deeper: host key -> agent-keyed record. */
-function dropRetiredAgentKeysByHost(value: unknown): boolean {
-  const record = asRecord(value)
-  if (!record) {
-    return false
-  }
-  let changed = false
-  for (const perHost of Object.values(record)) {
-    changed = dropRetiredAgentKeys(perHost) || changed
-  }
-  return changed
-}
-
-/** Clears a retired `agentId` to null, which every reader treats as "fall back to the default". */
-function clearRetiredAgentId(value: unknown): boolean {
-  const record = asRecord(value)
-  if (!record || !isRetiredAgent(record.agentId)) {
-    return false
-  }
-  record.agentId = null
-  return true
-}
-
-function cleanModelSelections(value: unknown): boolean {
-  const record = asRecord(value)
-  if (!record) {
-    return false
-  }
-  let changed = dropRetiredAgentKeys(record.selectedModelByAgent)
-  changed = dropRetiredAgentKeysByHost(record.selectedModelByAgentByHost) || changed
-  changed = dropRetiredAgentKeys(record.discoveredModelsByAgent) || changed
-  changed = dropRetiredAgentKeysByHost(record.discoveredModelsByAgentByHost) || changed
-  return changed
-}
-
-function cleanActionRecipes(value: unknown): boolean {
-  const record = asRecord(value)
-  if (!record) {
-    return false
-  }
-  let changed = false
-  for (const recipe of Object.values(record)) {
-    changed = clearRetiredAgentId(recipe) || changed
-  }
-  return changed
-}
-
-/** Covers both GlobalSettings.sourceControlAi and the per-repo override shape. */
-function cleanSourceControlAi(value: unknown): boolean {
-  const record = asRecord(value)
-  if (!record) {
-    return false
-  }
-  let changed = clearRetiredAgentId(record)
-  changed = cleanModelSelections(record) || changed
-  changed = cleanActionRecipes(record.actions) || changed
-  changed = cleanActionRecipes(record.launchActionDefaults) || changed
-  changed = cleanActionRecipes(record.actionOverrides) || changed
-  const modelOverrides = asRecord(record.modelOverridesByOperation)
-  for (const override of Object.values(modelOverrides ?? {})) {
-    changed = cleanModelSelections(override) || changed
-  }
-  return changed
-}
-
-function cleanSettings(value: unknown): boolean {
-  const settings = asRecord(value)
-  if (!settings) {
-    return false
-  }
-  let changed = false
-  for (const key of RETIRED_SETTINGS_KEYS) {
-    if (key in settings) {
-      delete settings[key]
-      changed = true
-    }
-  }
-  if (isRetiredAgent(settings.defaultTuiAgent)) {
-    settings.defaultTuiAgent = null
-    changed = true
-  }
-  if (Array.isArray(settings.disabledTuiAgents)) {
-    const kept = settings.disabledTuiAgents.filter((agent) => !isRetiredAgent(agent))
-    if (kept.length !== settings.disabledTuiAgents.length) {
-      settings.disabledTuiAgents = kept
-      changed = true
-    }
-  }
-  changed = dropRetiredAgentKeys(settings.agentCmdOverrides) || changed
-  changed = dropRetiredAgentKeys(settings.agentDefaultArgs) || changed
-  changed = dropRetiredAgentKeys(settings.agentDefaultEnv) || changed
-  changed = clearRetiredAgentId(settings.commitMessageAi) || changed
-  changed = cleanModelSelections(settings.commitMessageAi) || changed
-  changed = cleanSourceControlAi(settings.sourceControlAi) || changed
-  return changed
-}
-
-function cleanUi(value: unknown): boolean {
-  const ui = asRecord(value)
-  if (!ui || !Array.isArray(ui.statusBarItems)) {
-    return false
-  }
-  const kept = ui.statusBarItems.filter(
-    (item) => typeof item !== 'string' || !RETIRED_STATUS_BAR_ITEM_IDS.includes(item)
-  )
-  if (kept.length === ui.statusBarItems.length) {
-    return false
-  }
-  ui.statusBarItems = kept
-  return true
 }
 
 /**
@@ -160,13 +89,16 @@ function cleanUi(value: unknown): boolean {
  * can flag the profile for a re-save.
  */
 export function cleanRetiredAgentReferences(state: PersistedState): boolean {
-  let changed = cleanSettings(state.settings)
-  changed = cleanUi(state.ui) || changed
-  for (const repo of state.repos ?? []) {
-    changed = cleanSourceControlAi(repo?.sourceControlAi) || changed
+  const before = JSON.stringify(state)
+  // Why: automations dispatch without the isTuiAgent() guard most readers apply,
+  // so clearing the id alone would let them run on whatever agent is default.
+  // Scoped to automations on purpose — commitMessageAi also has an `enabled`
+  // flag, but there a cleared agent must not switch the whole feature off.
+  for (const automation of state.automations ?? []) {
+    if (automation && RETIRED_AGENTS.includes(automation.agentId)) {
+      automation.enabled = false
+    }
   }
-  for (const setup of state.projectHostSetups ?? []) {
-    changed = cleanSourceControlAi(setup?.sourceControlAi) || changed
-  }
-  return changed
+  scrub(state)
+  return JSON.stringify(state) !== before
 }

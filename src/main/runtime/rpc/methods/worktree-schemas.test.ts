@@ -11,15 +11,31 @@ describe('worktree RPC schemas', () => {
     ).toBe(false)
   })
 
-  it('rejects invalid startup agent values', () => {
+  it('strips a retired startup agent together with its prompt', () => {
+    // A mixed-version client can still send startupAgent:'gemini' plus a prompt.
+    // Stripping the agent alone left the prompt orphaned and failed the create.
     const parsed = WorktreeCreate.safeParse({
       repo: 'repo-1',
       name: 'agent-startup',
-      startupAgent: 'wat',
+      startupAgent: 'gemini',
       startupPrompt: 'hi'
     })
 
-    expect(parsed.success).toBe(false)
+    expect(parsed.success).toBe(true)
+    expect(parsed.data?.startupAgent).toBeUndefined()
+    expect(parsed.data?.startupPrompt).toBeUndefined()
+  })
+
+  it('keeps a supported startup agent and its prompt', () => {
+    const parsed = WorktreeCreate.parse({
+      repo: 'repo-1',
+      name: 'agent-startup',
+      startupAgent: 'claude',
+      startupPrompt: 'hi'
+    })
+
+    expect(parsed.startupAgent).toBe('claude')
+    expect(parsed.startupPrompt).toBe('hi')
   })
 
   it('rejects startup prompts without startup agents', () => {

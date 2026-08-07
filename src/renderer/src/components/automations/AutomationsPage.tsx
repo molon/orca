@@ -19,6 +19,7 @@ import type {
   AutomationRun,
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
+import { AUTOMATION_MISSING_AGENT_MESSAGE } from '../../../../shared/automations-types'
 import { getAutomationRunRepoId } from '../../../../shared/automation-run-identity'
 import {
   getLocalExecutionHostLabel,
@@ -1122,7 +1123,8 @@ export default function AutomationsPage(): React.JSX.Element {
     const nextDraft: AutomationDraft = {
       name: latest.name,
       prompt: latest.prompt,
-      agentId: latest.agentId,
+      // Preselect the default agent when a retired-agent cleanup cleared this one.
+      agentId: latest.agentId ?? defaultAgent,
       projectId: getAutomationRunRepoId(latest),
       workspaceMode: latest.workspaceMode,
       workspaceId: latest.workspaceId ?? '',
@@ -1513,6 +1515,11 @@ export default function AutomationsPage(): React.JSX.Element {
   }
 
   const toggleAutomation = async (automation: Automation): Promise<void> => {
+    // Why: resuming without an agent would only schedule runs that fail at dispatch.
+    if (!automation.enabled && !automation.agentId) {
+      toast.error(AUTOMATION_MISSING_AGENT_MESSAGE)
+      return
+    }
     await updateAutomationForTarget(
       automation,
       { enabled: !automation.enabled },

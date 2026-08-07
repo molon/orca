@@ -328,6 +328,15 @@ export function isTuiAgent(value: unknown): value is TuiAgent {
   return typeof value === 'string' && Object.hasOwn(TUI_AGENT_CONFIG, value)
 }
 
+/** Guards launch paths against ids that outlive a retired agent in saved state. */
+export function assertTuiAgent(value: unknown): asserts value is TuiAgent {
+  if (!isTuiAgent(value)) {
+    throw new Error(
+      `Unknown or retired TUI agent: ${typeof value === 'string' ? value : String(value)}`
+    )
+  }
+}
+
 export function getTuiAgentDetectCommands(config: TuiAgentConfig): string[] {
   return [config.detectCmd, ...(config.detectCmdAliases ?? [])]
 }

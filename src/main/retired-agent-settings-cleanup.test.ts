@@ -27,12 +27,11 @@ describe('cleanRetiredAgentReferences', () => {
     const state = profile({ settings: { defaultTuiAgent: 'gemini' } })
     expect(cleanRetiredAgentReferences(state)).toBe(true)
     expect(state.settings.defaultTuiAgent).toBeNull()
-  })
 
-  it('preserves blank as an explicit shell-only preference', () => {
-    const state = profile({ settings: { defaultTuiAgent: 'blank' } })
-    expect(cleanRetiredAgentReferences(state)).toBe(false)
-    expect(state.settings.defaultTuiAgent).toBe('blank')
+    // 'blank' is an explicit shell-only preference, not a retired agent.
+    const blank = profile({ settings: { defaultTuiAgent: 'blank' } })
+    expect(cleanRetiredAgentReferences(blank)).toBe(false)
+    expect(blank.settings.defaultTuiAgent).toBe('blank')
   })
 
   it('drops retired keys from agent-keyed launch settings', () => {
@@ -84,12 +83,19 @@ describe('cleanRetiredAgentReferences', () => {
     })
   })
 
-  it('clears the legacy commitMessageAi agent', () => {
+  it('clears the legacy commitMessageAi agent without switching the feature off', () => {
     const state = profile({
-      settings: { commitMessageAi: { agentId: 'gemini', selectedModelByAgent: { gemini: 'x' } } }
+      settings: {
+        commitMessageAi: { enabled: true, agentId: 'gemini', selectedModelByAgent: { gemini: 'x' } }
+      }
     })
     expect(cleanRetiredAgentReferences(state)).toBe(true)
-    expect(state.settings.commitMessageAi).toEqual({ agentId: null, selectedModelByAgent: {} })
+    // A cleared agent falls back to the default here, unlike automations.
+    expect(state.settings.commitMessageAi).toEqual({
+      enabled: true,
+      agentId: null,
+      selectedModelByAgent: {}
+    })
   })
 
   it('drops the removed Gemini CLI OAuth toggle', () => {
@@ -116,6 +122,44 @@ describe('cleanRetiredAgentReferences', () => {
     expect(
       state.projectHostSetups[0].sourceControlAi?.actionOverrides?.pullRequest?.agentId
     ).toBeNull()
+  })
+
+  it('disables and clears automations that still target a retired agent', () => {
+    const state = profile({
+      automations: [
+        { id: 'a1', name: 'Gemini nightly', agentId: 'gemini', enabled: true },
+        { id: 'a2', name: 'Claude hourly', agentId: 'claude', enabled: true }
+      ]
+    })
+    expect(cleanRetiredAgentReferences(state)).toBe(true)
+    expect(state.automations).toEqual([
+      { id: 'a1', name: 'Gemini nightly', agentId: null, enabled: false },
+      { id: 'a2', name: 'Claude hourly', agentId: 'claude', enabled: true }
+    ])
+  })
+
+  it('is sticky for already-disabled retired automations that still hold the agent id', () => {
+    const state = profile({
+      automations: [{ id: 'a1', agentId: 'gemini', enabled: false }]
+    })
+    expect(cleanRetiredAgentReferences(state)).toBe(true)
+    expect(state.automations).toEqual([{ id: 'a1', agentId: null, enabled: false }])
+    expect(cleanRetiredAgentReferences(state)).toBe(false)
+  })
+
+  it('drops a retired createdWithAgent so reopening cannot seed a missing agent', () => {
+    const state = profile({
+      worktreeMeta: {
+        wt1: { createdWithAgent: 'gemini', isPinned: true },
+        wt2: { createdWithAgent: 'codex' }
+      },
+      folderWorkspaces: [{ id: 'fw1', createdWithAgent: 'gemini' }]
+    })
+    expect(cleanRetiredAgentReferences(state)).toBe(true)
+    expect(state.worktreeMeta.wt1).toEqual({ isPinned: true })
+    expect(state.worktreeMeta.wt2.createdWithAgent).toBe('codex')
+    expect(state.folderWorkspaces[0]).toEqual({ id: 'fw1' })
+    expect(cleanRetiredAgentReferences(state)).toBe(false)
   })
 
   it('tolerates a profile missing every optional collection', () => {
