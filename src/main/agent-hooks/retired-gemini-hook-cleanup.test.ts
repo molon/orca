@@ -124,6 +124,24 @@ describe('removeRetiredGeminiManagedHooksLocal', () => {
     })
   })
 
+  it('keeps the managed script when the settings file cannot be parsed', () => {
+    // A JSONC settings.json may still hold a live entry pointing at the script;
+    // deleting it would turn a 404 into empty stdout the Gemini CLI can't parse.
+    const settingsDir = join(homeDir, '.gemini')
+    const hooksDir = join(homeDir, '.orca', 'agent-hooks')
+    mkdirSync(settingsDir, { recursive: true })
+    mkdirSync(hooksDir, { recursive: true })
+    const scriptPath = join(hooksDir, 'gemini-hook.sh')
+    writeFileSync(scriptPath, 'noop', 'utf8')
+    const raw = '{\n  // trailing comment style config\n  "hooks": {}\n}\n'
+    writeFileSync(join(settingsDir, 'settings.json'), raw, 'utf8')
+
+    removeRetiredGeminiManagedHooksLocal()
+
+    expect(readFileSync(join(settingsDir, 'settings.json'), 'utf8')).toBe(raw)
+    expect(existsSync(scriptPath)).toBe(true)
+  })
+
   it('does not touch Antigravity hooks under ~/.gemini/config', () => {
     const antigravityDir = join(homeDir, '.gemini', 'config')
     mkdirSync(antigravityDir, { recursive: true })

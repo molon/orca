@@ -39,13 +39,32 @@ function asRecord(value: unknown): Rec | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Rec) : null
 }
 
-function dropRetiredKeys(value: unknown): void {
+/** Every mutator reports whether it touched anything, so the dirty check costs
+ *  one walk instead of serializing the whole profile twice per launch. */
+function dropRetiredKeys(value: unknown): boolean {
   const record = asRecord(value)
+  let changed = false
   for (const key of Object.keys(record ?? {})) {
     if (RETIRED_AGENTS.includes(key)) {
       delete record![key]
+      changed = true
     }
   }
+  return changed
+}
+
+function filterRetired(
+  record: Rec,
+  key: string,
+  values: unknown[],
+  retired: readonly unknown[]
+): boolean {
+  const kept = values.filter((value) => !retired.includes(value))
+  if (kept.length === values.length) {
+    return false
+  }
+  record[key] = kept
+  return true
 }
 
 /**
@@ -54,34 +73,41 @@ function dropRetiredKeys(value: unknown): void {
  * per shape (settings, per-repo overrides, action recipes, automations), so
  * matching on the key rather than the path covers them all.
  */
-function scrub(node: unknown): void {
+function scrub(node: unknown): boolean {
   if (Array.isArray(node)) {
-    node.forEach(scrub)
-    return
+    // Why not .some(): short-circuiting would skip the rest of the array.
+    return node.reduce<boolean>((changed, entry) => scrub(entry) || changed, false)
   }
   const record = asRecord(node)
   if (!record) {
-    return
+    return false
   }
+  let changed = false
   for (const [key, value] of Object.entries(record)) {
     if (RETIRED_KEYS.includes(key)) {
       delete record[key]
+      changed = true
     } else if (AGENT_ID_KEYS.includes(key) && RETIRED_AGENTS.includes(value)) {
       record[key] = null
+      changed = true
     } else if (key === 'createdWithAgent' && RETIRED_AGENTS.includes(value)) {
       delete record[key]
+      changed = true
     } else if (key === 'disabledTuiAgents' && Array.isArray(value)) {
-      record[key] = value.filter((agent) => !RETIRED_AGENTS.includes(agent))
+      changed = filterRetired(record, key, value, RETIRED_AGENTS) || changed
     } else if (key === 'statusBarItems' && Array.isArray(value)) {
-      record[key] = value.filter((item) => !RETIRED_STATUS_BAR_ITEMS.includes(item))
+      changed = filterRetired(record, key, value, RETIRED_STATUS_BAR_ITEMS) || changed
     } else if (AGENT_KEYED_MAPS.includes(key)) {
-      dropRetiredKeys(value)
+      changed = dropRetiredKeys(value) || changed
     } else if (AGENT_KEYED_MAPS_BY_HOST.includes(key)) {
-      Object.values(asRecord(value) ?? {}).forEach(dropRetiredKeys)
+      for (const perHost of Object.values(asRecord(value) ?? {})) {
+        changed = dropRetiredKeys(perHost) || changed
+      }
     } else {
-      scrub(value)
+      changed = scrub(value) || changed
     }
   }
+  return changed
 }
 
 /**
@@ -89,16 +115,16 @@ function scrub(node: unknown): void {
  * can flag the profile for a re-save.
  */
 export function cleanRetiredAgentReferences(state: PersistedState): boolean {
-  const before = JSON.stringify(state)
+  let changed = false
   // Why: automations dispatch without the isTuiAgent() guard most readers apply,
   // so clearing the id alone would let them run on whatever agent is default.
   // Scoped to automations on purpose — commitMessageAi also has an `enabled`
   // flag, but there a cleared agent must not switch the whole feature off.
   for (const automation of state.automations ?? []) {
-    if (automation && RETIRED_AGENTS.includes(automation.agentId)) {
+    if (automation && RETIRED_AGENTS.includes(automation.agentId) && automation.enabled !== false) {
       automation.enabled = false
+      changed = true
     }
   }
-  scrub(state)
-  return JSON.stringify(state) !== before
+  return scrub(state) || changed
 }

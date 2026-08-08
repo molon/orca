@@ -15,12 +15,34 @@ function profile(overrides: Record<string, unknown>): PersistedState {
 
 describe('cleanRetiredAgentReferences', () => {
   it('leaves a profile without retired agents untouched', () => {
+    const statusBarItems = ['claude', 'ports']
     const state = profile({
-      settings: { defaultTuiAgent: 'claude', agentCmdOverrides: { codex: 'codex-next' } }
+      settings: { defaultTuiAgent: 'claude', agentCmdOverrides: { codex: 'codex-next' } },
+      ui: { statusBarItems }
     })
     expect(cleanRetiredAgentReferences(state)).toBe(false)
     expect(state.settings.defaultTuiAgent).toBe('claude')
     expect(state.settings.agentCmdOverrides).toEqual({ codex: 'codex-next' })
+    // A clean list keeps its identity: nothing is rewritten just to be re-saved.
+    expect(state.ui.statusBarItems).toBe(statusBarItems)
+  })
+
+  it('reports a change from a deeply nested retired agent id', () => {
+    // The dirty flag propagates out of arrays and nested records, not just the
+    // top level — it replaced a full JSON.stringify before/after comparison.
+    const state = profile({
+      repos: [
+        {
+          id: 'r1',
+          sourceControlAi: { actionOverrides: { commitMessage: { agentId: 'claude' } } }
+        },
+        { id: 'r2', sourceControlAi: { actionOverrides: { commitMessage: { agentId: 'gemini' } } } }
+      ]
+    })
+    expect(cleanRetiredAgentReferences(state)).toBe(true)
+    expect(state.repos[1].sourceControlAi?.actionOverrides?.commitMessage?.agentId).toBeNull()
+    expect(state.repos[0].sourceControlAi?.actionOverrides?.commitMessage?.agentId).toBe('claude')
+    expect(cleanRetiredAgentReferences(state)).toBe(false)
   })
 
   it('resets defaultTuiAgent so the composer does not preselect a missing agent', () => {

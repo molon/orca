@@ -22,8 +22,8 @@ const SCRIPT_FILES = ['gemini-hook.sh', 'gemini-hook.cmd', 'gemini-hook.ps1'] as
 const isManagedCommand = createManagedCommandMatcher('gemini-hook.sh')
 
 /** Returns the rewritten config, or null when the file holds no managed Gemini hooks. */
-function stripManagedGeminiHooks(config: HooksConfig | null): HooksConfig | null {
-  const hooks = config?.hooks
+function stripManagedGeminiHooks(config: HooksConfig): HooksConfig | null {
+  const hooks = config.hooks
   if (!hooks || typeof hooks !== 'object') {
     return null
   }
@@ -47,12 +47,26 @@ function stripManagedGeminiHooks(config: HooksConfig | null): HooksConfig | null
   return changed ? { ...config, hooks: nextHooks } : null
 }
 
-/** Idempotent local upgrade cleanup for retired Gemini CLI managed hooks. */
+/**
+ * Why gate the unlink: a config Orca could not parse (JSONC comments) or could
+ * not rewrite may still hold a live entry pointing at the script. Deleting it
+ * then turns a 404 POST into empty stdout, which a JSON-expecting Gemini CLI
+ * reads as a broken hook — worse than the stale endpoint. Only sweep the
+ * scripts once the settings file is known to be free of managed entries.
+ */
 export function removeRetiredGeminiManagedHooksLocal(): void {
   const configPath = join(homedir(), '.gemini', 'settings.json')
-  const cleaned = stripManagedGeminiHooks(readHooksJson(configPath))
+  const config = readHooksJson(configPath)
+  if (!config) {
+    return
+  }
+  const cleaned = stripManagedGeminiHooks(config)
   if (cleaned) {
-    writeHooksJson(configPath, cleaned)
+    try {
+      writeHooksJson(configPath, cleaned)
+    } catch {
+      return
+    }
   }
   for (const fileName of SCRIPT_FILES) {
     try {
@@ -63,7 +77,7 @@ export function removeRetiredGeminiManagedHooksLocal(): void {
   }
 }
 
-/** Idempotent remote (SSH) cleanup mirroring local remove for Gemini CLI hooks. */
+/** Idempotent remote (SSH/WSL) cleanup mirroring local remove for Gemini CLI hooks. */
 export async function removeRetiredGeminiManagedHooksRemote(
   sftp: SFTPWrapper,
   remoteHome: string
@@ -71,12 +85,18 @@ export async function removeRetiredGeminiManagedHooksRemote(
   const home = remoteHome.replace(/\/$/, '')
   const configPath = `${home}/.gemini/settings.json`
   try {
-    const cleaned = stripManagedGeminiHooks(await readHooksJsonRemote(sftp, configPath))
+    const config = await readHooksJsonRemote(sftp, configPath)
+    if (!config) {
+      return
+    }
+    const cleaned = stripManagedGeminiHooks(config)
     if (cleaned) {
       await writeHooksJsonRemote(sftp, configPath, cleaned)
     }
   } catch {
-    // Best-effort: do not block remote hook install for other agents.
+    // Best-effort: do not block remote hook install for other agents. Leave the
+    // scripts in place so any surviving entry still resolves (see local note).
+    return
   }
   for (const fileName of SCRIPT_FILES) {
     // Missing file or permission errors are non-fatal for upgrade cleanup.

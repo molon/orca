@@ -93,7 +93,8 @@ import {
   buildHermesCronSchedule,
   formatTimeInput,
   getDefaultWorktree,
-  parseDraftTime
+  parseDraftTime,
+  resolveDraftAgentId
 } from './automation-draft-model'
 import {
   getRepoBackedAutomationSourceContext,
@@ -1124,8 +1125,9 @@ export default function AutomationsPage(): React.JSX.Element {
     const nextDraft: AutomationDraft = {
       name: latest.name,
       prompt: latest.prompt,
-      // Preselect the default agent when a retired-agent cleanup cleared this one.
-      agentId: latest.agentId ?? defaultAgent,
+      // Preselect the default agent when this one was cleared or is retired —
+      // a ghost id from a mixed-version host would fail the refine on save.
+      agentId: resolveDraftAgentId(latest.agentId, defaultAgent),
       projectId: getAutomationRunRepoId(latest),
       workspaceMode: latest.workspaceMode,
       workspaceId: latest.workspaceId ?? '',

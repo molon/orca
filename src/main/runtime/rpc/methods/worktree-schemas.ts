@@ -15,29 +15,41 @@ import { TaskSourceContextSchema } from '../../../../shared/task-source-context-
 import { WorkspaceLinkedItemSchema } from '../../../../shared/workspace-linked-item-schema'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../../shared/workspace-linked-item-source-context'
 
-// Why: mixed client/host versions can still send retired ids (e.g. gemini).
-// Strip to undefined like createdWithAgent so worktree-create is not rejected.
+/** Agent ids Orca no longer ships but a mixed-version client can still send. */
+const RETIRED_STARTUP_AGENTS: readonly unknown[] = ['gemini']
+
+// Why: a typo'd or garbage agent id must still fail loudly; only the retired ids
+// handled by the preprocess below are soft-compat, and they never reach here.
 const OptionalTuiAgent = z
   .unknown()
+  .superRefine((value, ctx) => {
+    if (value !== undefined && !isTuiAgent(value)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Unknown TUI agent' })
+    }
+  })
   .transform((value): TuiAgent | undefined => (isTuiAgent(value) ? value : undefined))
   .optional()
 
 /**
- * Why: `startupPrompt` only travels with a `startupAgent`, so a stripped retired
- * agent must take its prompt with it. Otherwise the leftover prompt trips the
- * "startupPrompt requires startupAgent" refinement below and the create fails
- * instead of degrading to a plain shell.
+ * Why: `startupPrompt` only travels with a `startupAgent`, so dropping a retired
+ * agent orphans its prompt — it would trip the "startupPrompt requires
+ * startupAgent" refinement below, and dropping both silently discarded the
+ * user's task text into a plain shell. Rehome the prompt as `startupDraft`
+ * instead: the host then picks the default/detected agent and drafts the text
+ * into it rather than auto-submitting to an agent the client never chose.
  */
-function dropRetiredStartupAgentPair(value: unknown): unknown {
+function rehomeRetiredStartupAgent(value: unknown): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return value
   }
   const params = value as Record<string, unknown>
-  if (params.startupAgent === undefined || isTuiAgent(params.startupAgent)) {
+  if (!RETIRED_STARTUP_AGENTS.includes(params.startupAgent)) {
     return value
   }
-  const { startupAgent: _startupAgent, startupPrompt: _startupPrompt, ...rest } = params
-  return rest
+  const { startupAgent: _startupAgent, startupPrompt, startupDraft, ...rest } = params
+  // An explicit draft wins; the prompt only fills an empty draft slot.
+  const rehomedDraft = startupDraft ?? startupPrompt
+  return rehomedDraft === undefined ? rest : { ...rest, startupDraft: rehomedDraft }
 }
 
 const AutomationWorkspaceProvenanceRequest = z.object({
@@ -227,7 +239,7 @@ const WorktreeCreateParams = z
     }
   })
 
-export const WorktreeCreate = z.preprocess(dropRetiredStartupAgentPair, WorktreeCreateParams)
+export const WorktreeCreate = z.preprocess(rehomeRetiredStartupAgent, WorktreeCreateParams)
 
 export const WorktreePrefetchCreateBase = z.object({
   repo: z

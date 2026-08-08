@@ -158,6 +158,40 @@ describe.skipIf(process.platform === 'win32')(
       expect(installHooks).not.toHaveBeenCalled()
     })
 
+    it('leaves retired Gemini cleanup to the installers once an agent is detected', async () => {
+      // Single ownership: installRemoteManagedAgentHooks already cleans retired
+      // hooks, so the adapter must not run a second pass over the same config.
+      harness.guestDispatcher.onRequest('preflight.detectAgents', async () => ({
+        agents: ['claude']
+      }))
+      mkdirSync(join(home, '.gemini'), { recursive: true })
+      mkdirSync(join(home, '.orca', 'agent-hooks'), { recursive: true })
+      const scriptPath = join(home, '.orca', 'agent-hooks', 'gemini-hook.sh')
+      writeFileSync(scriptPath, 'noop', 'utf8')
+      const settings = {
+        hooks: {
+          BeforeAgent: [{ hooks: [{ type: 'command', command: `/bin/sh '${scriptPath}'` }] }]
+        }
+      }
+      writeFileSync(join(home, '.gemini', 'settings.json'), JSON.stringify(settings), 'utf8')
+      const installHooks = vi.fn(async () => [])
+
+      await installWslGuestHooks({
+        mux: harness.mux,
+        guestHome: home,
+        distro: 'Ubuntu',
+        installHooks: installHooks as never,
+        settings: null,
+        warn: () => {}
+      })
+
+      expect(installHooks).toHaveBeenCalledTimes(1)
+      expect(JSON.parse(readFileSync(join(home, '.gemini', 'settings.json'), 'utf8'))).toEqual(
+        settings
+      )
+      expect(existsSync(scriptPath)).toBe(true)
+    })
+
     it('runs the unchanged remote managed hook installers against a WSL guest home', async () => {
       const adapter = createWslHookSftpAdapter(harness.mux)
       const results = await installRemoteManagedAgentHooks(adapter, home, {
