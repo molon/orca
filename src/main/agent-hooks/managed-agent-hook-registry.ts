@@ -45,7 +45,6 @@ export const MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS: readonly ManagedAgentHookScri
   ['claude', () => claudeHookService.refreshManagedScripts()],
   ['openclaude', () => openClaudeHookService.refreshManagedScripts()],
   ['codex', () => codexHookService.refreshManagedScripts()],
-  ['gemini', () => geminiHookService.refreshManagedScripts()],
   ['antigravity', () => antigravityHookService.refreshManagedScripts()],
   ['cursor', () => cursorHookService.refreshManagedScripts()],
   ['droid', () => droidHookService.refreshManagedScripts()],
