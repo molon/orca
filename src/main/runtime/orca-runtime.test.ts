@@ -34201,7 +34201,7 @@ describe('OrcaRuntimeService', () => {
       runtime.onPtyData('pty-1', '\x1b]0;Codex done\x07', 101)
       expect(write).toHaveBeenCalledWith(
         'pty-1',
-        '\nYou have 1 orchestration message. Run `orca orchestration check`.\n'
+        '\nYou have 1 orchestration message. Run `orca orchestration check --run run_mailbox`.\n'
       )
       expect(write).not.toHaveBeenCalledWith(
         'pty-1',
@@ -34263,7 +34263,7 @@ describe('OrcaRuntimeService', () => {
     await vi.waitFor(() => {
       expect(write).toHaveBeenCalledWith(
         'pty-1',
-        '\nYou have 1 orchestration message. Run `orca orchestration check`.\n'
+        '\nYou have 1 orchestration message. Run `orca orchestration check --run run_codex_native_title`.\n'
       )
     })
     db.close()

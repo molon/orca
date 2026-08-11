@@ -127,7 +127,7 @@ export type IPtyProvider = {
   hasPty?: (id: string) => boolean | null
   /** Exact provider readback: false only when the provider answered that the PTY is absent. */
   probePtyLiveness?: (id: string) => Promise<boolean | null>
-  write(id: string, data: string): void
+  write(id: string, data: string): boolean | void
   resize(id: string, cols: number, rows: number): void
   /**
    * Producer-side flow control: stop/restart reading the underlying PTY so a
