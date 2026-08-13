@@ -15,9 +15,9 @@ import { getDefaultPersistedState } from '../../shared/constants'
 import type { GlobalSettings, PersistedState } from '../../shared/types'
 import {
   applyAgentStatusHooksEnabled,
-  getManagedAgentHookStatuses
+  getManagedAgentHookStatuses,
+  prepareManagedCodexHomeBeforeShellLaunch
 } from '../../main/agent-hooks/managed-agent-hook-controls'
-import { prepareManagedCodexHomeBeforeShellLaunch } from '../../main/codex/managed-home-shell-preflight'
 
 type AgentHookCommandResult = {
   enabled: boolean
