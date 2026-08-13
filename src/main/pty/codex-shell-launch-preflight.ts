@@ -37,7 +37,10 @@ export function getPowerShellCodexShellLaunchPreflight(): string {
 if ($env:ORCA_CODEX_LAUNCH_PREFLIGHT -and $orcaCodexCommand -and
     $orcaCodexCommand.CommandType -in @("Application", "ExternalScript")) {
     function Global:codex {
-        & $env:ORCA_CODEX_LAUNCH_PREFLIGHT agent hooks prepare-codex *> $null
+        try {
+            & $env:ORCA_CODEX_LAUNCH_PREFLIGHT agent hooks prepare-codex *> $null
+        } catch {
+        }
         $orcaCodexExecutable = Get-Command codex -CommandType Application,ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $orcaCodexExecutable) {
             Write-Error "codex executable not found"

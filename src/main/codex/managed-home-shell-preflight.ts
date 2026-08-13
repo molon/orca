@@ -31,10 +31,13 @@ function resolveAccountManagedHome(candidate: string, userDataPath: string): str
     return null
   }
   const accountId = pathParts[0]
+  if (accountId === '.' || accountId === '..') {
+    return null
+  }
   const expectedHome = join(accountsRoot, accountId, 'home')
   let expectedRealHome: string
   try {
-    expectedRealHome = join(realpathSync.native(accountsRoot), accountId, 'home')
+    expectedRealHome = join(realpathSync.native(userDataPath), 'codex-accounts', accountId, 'home')
   } catch {
     return null
   }

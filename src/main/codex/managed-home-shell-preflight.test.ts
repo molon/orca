@@ -118,4 +118,35 @@ describe('managed Codex shell preflight', () => {
       )
     ).toBeNull()
   })
+
+  it('rejects a parent traversal account marker', () => {
+    const userDataPath = makeRoot()
+    const candidate = join(userDataPath, 'home')
+    mkdirSync(join(userDataPath, 'codex-accounts'))
+    mkdirSync(candidate)
+    writeFileSync(join(candidate, '.orca-managed-home'), '..\n')
+
+    expect(
+      resolveManagedCodexShellPreflightHome(
+        { CODEX_HOME: candidate, ORCA_CODEX_HOME: candidate },
+        userDataPath
+      )
+    ).toBeNull()
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects a symlinked accounts root', () => {
+    const userDataPath = makeRoot()
+    const outside = makeRoot()
+    const candidate = join(userDataPath, 'codex-accounts', 'account-1', 'home')
+    mkdirSync(join(outside, 'account-1', 'home'), { recursive: true })
+    writeFileSync(join(outside, 'account-1', 'home', '.orca-managed-home'), 'account-1\n')
+    symlinkSync(outside, join(userDataPath, 'codex-accounts'))
+
+    expect(
+      resolveManagedCodexShellPreflightHome(
+        { CODEX_HOME: candidate, ORCA_CODEX_HOME: candidate },
+        userDataPath
+      )
+    ).toBeNull()
+  })
 })

@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -12,6 +12,8 @@ import {
 
 const roots: string[] = []
 const fishAvailable = spawnSync('fish', ['--version']).status === 0
+const pwshAvailable =
+  spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0
 
 function writeExecutable(path: string, content: string): void {
   writeFileSync(path, content)
@@ -117,11 +119,55 @@ describe.skipIf(process.platform === 'win32')('Codex shell launch preflight', ()
 
     expect(output.trim()).toBe('custom-codex')
   })
+})
 
-  it('preserves a user-defined PowerShell command', () => {
+describe('PowerShell Codex shell launch preflight', () => {
+  it('preserves a user-defined command', () => {
     expect(getPowerShellCodexShellLaunchPreflight()).toContain(
       '$orcaCodexCommand.CommandType -in @("Application", "ExternalScript")'
     )
+  })
+
+  it.skipIf(!pwshAvailable)('fails open when native errors are promoted', () => {
+    const root = mkdtempSync(join(tmpdir(), 'orca-codex-pwsh-failure-'))
+    const bin = join(root, 'bin')
+    roots.push(root)
+    mkdirSync(bin)
+    const executableSuffix = process.platform === 'win32' ? '.cmd' : ''
+    writeExecutable(
+      join(bin, `orca-test${executableSuffix}`),
+      process.platform === 'win32' ? '@exit /b 7\r\n' : '#!/bin/sh\nexit 7\n'
+    )
+    writeExecutable(
+      join(bin, `codex${executableSuffix}`),
+      process.platform === 'win32' ? '@echo launched\r\n' : '#!/bin/sh\nprintf "launched\\n"\n'
+    )
+
+    const result = spawnSync(
+      'pwsh',
+      [
+        '-NoLogo',
+        '-NoProfile',
+        '-Command',
+        [
+          '$ErrorActionPreference = "Stop"',
+          '$PSNativeCommandUseErrorActionPreference = $true',
+          getPowerShellCodexShellLaunchPreflight(),
+          'codex'
+        ].join('\n')
+      ],
+      {
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+          ORCA_CODEX_LAUNCH_PREFLIGHT: join(bin, `orca-test${executableSuffix}`)
+        }
+      }
+    )
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(result.stdout.trim()).toBe('launched')
   })
 })
 
