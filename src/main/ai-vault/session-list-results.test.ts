@@ -123,6 +123,34 @@ describe('mergeAiVaultListResults', () => {
     ).toBe('2026-08-02T00:00:04.000Z')
   })
 
+  // Leg order is host-enumeration order (local, then SSH, then runtime), so it
+  // must not decide the merged stamp.
+  it('resolves an equal-instant tie the same way in either leg order', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-02T00:00:10.000Z'))
+    const noMillis = { ...listResult([]), scannedAt: '2026-08-02T00:00:05Z' }
+    const withMillis = { ...listResult([]), scannedAt: '2026-08-02T00:00:05.000Z' }
+
+    expect(mergeAiVaultListResults([noMillis, withMillis], undefined).scannedAt).toBe(
+      '2026-08-02T00:00:05.000Z'
+    )
+    expect(mergeAiVaultListResults([withMillis, noMillis], undefined).scannedAt).toBe(
+      '2026-08-02T00:00:05.000Z'
+    )
+  })
+
+  it('normalizes the merged stamp so a leg ISO variant cannot leak into it', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-02T00:00:10.000Z'))
+
+    expect(
+      mergeAiVaultListResults(
+        [{ ...listResult([]), scannedAt: '2026-08-01T19:00:05.000-05:00' }],
+        undefined
+      ).scannedAt
+    ).toBe('2026-08-02T00:00:05.000Z')
+  })
+
   it('does not cap an Unlimited all-host merge', () => {
     const sessions = Array.from({ length: 1001 }, (_, index) => session(index))
     const merged = mergeAiVaultListResults([{ ...listResult([]), sessions }], undefined, true)
