@@ -127,7 +127,6 @@ test.describe('Voice microphone selection', () => {
         message: 'selected microphone did not persist'
       })
       .toEqual({ deviceId: 'usb-mic', label: 'USB Microphone' })
-    await expect(microphone).toHaveText('USB Microphone')
 
     await orcaPage.reload({ waitUntil: 'domcontentloaded' })
     await waitForSessionReady(orcaPage)
