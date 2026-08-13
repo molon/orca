@@ -10,7 +10,8 @@ const {
   callMock,
   getCliStatusMock,
   getDefaultUserDataPathMock,
-  getManagedAgentHookStatusesMock
+  getManagedAgentHookStatusesMock,
+  prepareManagedCodexHomeBeforeShellLaunchMock
 } = vi.hoisted(() => ({
   applyAgentStatusHooksEnabledMock: vi.fn(),
   callMock: vi.fn(),
@@ -27,7 +28,8 @@ const {
     })
   ),
   getDefaultUserDataPathMock: vi.fn(),
-  getManagedAgentHookStatusesMock: vi.fn()
+  getManagedAgentHookStatusesMock: vi.fn(),
+  prepareManagedCodexHomeBeforeShellLaunchMock: vi.fn()
 }))
 
 vi.mock('../runtime-client', () => {
@@ -57,6 +59,10 @@ vi.mock('../../main/agent-hooks/managed-agent-hook-controls', () => ({
   getManagedAgentHookStatuses: getManagedAgentHookStatusesMock
 }))
 
+vi.mock('../../main/codex/managed-home-shell-preflight', () => ({
+  prepareManagedCodexHomeBeforeShellLaunch: prepareManagedCodexHomeBeforeShellLaunchMock
+}))
+
 import { main } from '../index'
 
 function readDataFile(userDataPath: string): PersistedState {
@@ -82,6 +88,7 @@ describe('agent hooks CLI handler', () => {
     callMock.mockReset()
     getCliStatusMock.mockClear()
     getManagedAgentHookStatusesMock.mockReturnValue([])
+    prepareManagedCodexHomeBeforeShellLaunchMock.mockReset()
     process.exitCode = undefined
     vi.spyOn(console, 'log').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -119,5 +126,19 @@ describe('agent hooks CLI handler', () => {
     await runAgentHooksOff(userDataPath)
 
     expect(readDataFile(userDataPath).settings.experimentalNewWorktreeCardStyle).toBe(true)
+  })
+
+  it('prepares managed Codex trust with the current hooks setting', async () => {
+    const state = getDefaultPersistedState(userDataPath)
+    state.settings.agentStatusHooksEnabled = false
+    writeDataFile(userDataPath, state)
+    getDefaultUserDataPathMock.mockReturnValue(userDataPath)
+
+    await main(['agent', 'hooks', 'prepare-codex'], userDataPath)
+
+    expect(prepareManagedCodexHomeBeforeShellLaunchMock).toHaveBeenCalledWith({
+      userDataPath,
+      hooksEnabled: false
+    })
   })
 })

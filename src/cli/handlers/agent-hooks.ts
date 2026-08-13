@@ -17,6 +17,7 @@ import {
   applyAgentStatusHooksEnabled,
   getManagedAgentHookStatuses
 } from '../../main/agent-hooks/managed-agent-hook-controls'
+import { prepareManagedCodexHomeBeforeShellLaunch } from '../../main/codex/managed-home-shell-preflight'
 
 type AgentHookCommandResult = {
   enabled: boolean
@@ -157,6 +158,12 @@ async function setAgentHooksEnabled(
 }
 
 export const AGENT_HOOK_HANDLERS: Record<string, CommandHandler> = {
+  'agent hooks prepare-codex': async () => {
+    prepareManagedCodexHomeBeforeShellLaunch({
+      userDataPath: getDefaultUserDataPath(),
+      hooksEnabled: readEnabledFromDisk()
+    })
+  },
   'agent hooks status': async ({ json }) => {
     const result: AgentHookCommandResult = {
       enabled: readEnabledFromDisk(),
