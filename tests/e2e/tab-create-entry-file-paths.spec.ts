@@ -18,7 +18,12 @@ test('new-tab file results prioritize the filename and reveal the full path on h
   await waitForActiveWorktree(orcaPage)
   await ensureTerminalVisible(orcaPage)
 
-  await orcaPage.getByRole('button', { name: 'New tab' }).click({ force: true })
+  const newTab = orcaPage.getByRole('button', { name: 'New tab' })
+  // Keyboard activation avoids the animated tab bar's pointer stability gate in CI.
+  await newTab.press('Space')
+  // Opening transfers focus to the search box; one key makes its result-list
+  // relationship available before the structural locator below resolves.
+  await orcaPage.keyboard.insertText('s')
   // Not the placeholder/aria-label: that copy is translated and already drifted
   // once. aria-controls points at the results listbox id, which is structural.
   const input = orcaPage.locator('input[role="combobox"][aria-controls="tab-create-entry-results"]')

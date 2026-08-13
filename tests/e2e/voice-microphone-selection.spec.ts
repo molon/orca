@@ -119,7 +119,8 @@ test.describe('Voice microphone selection', () => {
     // Settings can still be animating; keyboard activation does not depend on its position.
     await microphone.press('Space')
     await expect(orcaPage.getByRole('option', { name: 'USB Microphone' })).toBeVisible()
-    await orcaPage.getByRole('option', { name: 'USB Microphone' }).click()
+    // Keyboard selection bypasses the transient pointer stability gate in CI.
+    await orcaPage.getByRole('option', { name: 'USB Microphone' }).press('Enter')
 
     await expect
       .poll(() => readMicrophoneSettings(orcaPage), {
