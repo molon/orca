@@ -46,15 +46,16 @@ describe('mobile push envelope', () => {
 
   it('rejects a tampered ciphertext rather than returning altered content', () => {
     const key = generateMobilePushKey()
-    const sealed = sealMobilePushEnvelope(payload, key)
-    const bytes = atob(sealed)
-    const flipped =
-      bytes.slice(0, -1) + String.fromCharCode(bytes.charCodeAt(bytes.length - 1) ^ 0x01)
-    expect(() => openMobilePushEnvelope(btoa(flipped), key)).toThrow(MobilePushEnvelopeError)
+    const framed = Buffer.from(sealMobilePushEnvelope(payload, key), 'base64')
+    framed[framed.length - 1] ^= 0x01
+    expect(() => openMobilePushEnvelope(framed.toString('base64'), key)).toThrow(
+      MobilePushEnvelopeError
+    )
   })
 
-  it('rejects an envelope too short to hold a nonce', () => {
-    expect(() => openMobilePushEnvelope(btoa('short'), generateMobilePushKey())).toThrow(
+  it('rejects an envelope too short to hold a nonce and tag', () => {
+    const short = Buffer.alloc(20).toString('base64')
+    expect(() => openMobilePushEnvelope(short, generateMobilePushKey())).toThrow(
       MobilePushEnvelopeError
     )
   })
@@ -66,7 +67,27 @@ describe('mobile push envelope', () => {
   })
 
   it('rejects a key of the wrong length instead of silently padding it', () => {
-    expect(() => mobilePushKeyFromBase64(btoa('too short'))).toThrow(MobilePushEnvelopeError)
+    expect(() => mobilePushKeyFromBase64(Buffer.alloc(16).toString('base64'))).toThrow(
+      MobilePushEnvelopeError
+    )
+  })
+
+  // Why pinned: the Swift extension opens this with
+  // AES.GCM.SealedBox(combined:), which assumes exactly nonce(12) || body ||
+  // tag(16). Changing the framing silently breaks decryption on the phone
+  // while every test here would still pass on its own round trip.
+  it('frames as CryptoKit expects, so the extension needs no parsing code', () => {
+    const key = generateMobilePushKey()
+    const plaintextLength = Buffer.from(JSON.stringify(payload), 'utf8').byteLength
+    const framed = Buffer.from(sealMobilePushEnvelope(payload, key), 'base64')
+    expect(framed.length).toBe(12 + plaintextLength + 16)
+  })
+
+  it('uses a fresh nonce per seal, so the same key never repeats one', () => {
+    const key = generateMobilePushKey()
+    const first = Buffer.from(sealMobilePushEnvelope(payload, key), 'base64').subarray(0, 12)
+    const second = Buffer.from(sealMobilePushEnvelope(payload, key), 'base64').subarray(0, 12)
+    expect(first.equals(second)).toBe(false)
   })
 
   // Why: APNs drops payloads over 4 KiB, and the envelope is only part of the
