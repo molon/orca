@@ -118,9 +118,9 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
         clearPendingLiveInputCommit()
         return
       }
-      // Why: iOS kills an active dictation/IME session when JS writes a value
-      // that differs from the native field text, so the controlled capture must
-      // echo the field verbatim; only the PTY mirror sees normalized text.
+      // Why: the field is uncontrolled while focused (iOS kills dictation/IME on
+      // any JS write), so the capture only mirrors the field for display; the
+      // PTY mirror sees normalized text.
       setLiveInputCapture(text)
       applyLiveInputMirror(activeHandle, normalizeTerminalTextInput(text))
     },

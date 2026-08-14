@@ -799,6 +799,9 @@ export default function SessionScreen() {
   const [terminalLinkOpenMode, setTerminalLinkOpenMode] =
     useState<MobileTerminalLinkOpenMode>('orca-browser')
   const [liveInputCapture, setLiveInputCapture] = useState('')
+  // Why: iOS kills active dictation/IME on any JS write into the focused field;
+  // while editing the field is uncontrolled so JS never touches native text.
+  const [liveInputEditing, setLiveInputEditing] = useState(false)
   const {
     clearTerminalLiveInputDefault,
     defaultTerminalHandlesToLiveInput,
@@ -4895,7 +4898,9 @@ export default function SessionScreen() {
                     <TextInput
                       ref={liveInputRef}
                       style={styles.liveInputCapture}
-                      value={liveInputCapture}
+                      value={liveInputEditing ? undefined : liveInputCapture}
+                      onFocus={() => setLiveInputEditing(true)}
+                      onBlur={() => setLiveInputEditing(false)}
                       onChangeText={handleLiveInputChange}
                       onKeyPress={handleLiveInputKeyPress}
                       onSubmitEditing={handleLiveInputSubmit}

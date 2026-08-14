@@ -22,4 +22,8 @@ describe('terminal iOS dictation write-back', () => {
   it('still normalizes the buffered command text at send time', () => {
     expect(sessionRouteSource).toContain('normalizeTerminalTextInput(input)')
   })
+
+  it('never writes the live-input value back while the field is focused', () => {
+    expect(sessionRouteSource).toContain('value={liveInputEditing ? undefined : liveInputCapture}')
+  })
 })
