@@ -12,39 +12,73 @@ import * as SecureStore from 'expo-secure-store'
 // backup restores, so a restored backup cannot decrypt another device's pushes.
 const PUSH_KEY_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
-  // Why its own service: the extension reads through an app-group keychain
-  // entry, and keeping it out of the pairing service avoids widening what the
-  // extension process can reach to just this key.
+  // Why its own service: the extension reads through a shared keychain access
+  // group, and keeping this out of the pairing service avoids widening what
+  // the extension process can reach to just these entries.
   keychainService: 'orca.push.v1'
 }
 
 const PUSH_KEY_PREFIX = 'orca:push-key:'
 
-function storageKey(hostId: string): string {
-  return `${PUSH_KEY_PREFIX}${encodeURIComponent(hostId)}`
+/**
+ * What the extension needs to turn one push into a routed notification.
+ *
+ * Why hostId lives here rather than inside the envelope: hostId is assigned by
+ * the phone's own host list, so the desktop cannot know it and cannot seal it
+ * in. Storing it beside the key lets the extension recover it after decrypting,
+ * which keeps tap routing identical to the local path.
+ */
+export type StoredPushIdentity = {
+  readonly pushKeyB64: string
+  readonly hostId: string
 }
 
-/** Stores the per-device push key for one paired host. */
-export async function savePushKey(hostId: string, pushKeyB64: string): Promise<void> {
-  await SecureStore.setItemAsync(storageKey(hostId), pushKeyB64, PUSH_KEY_OPTIONS)
+/**
+ * Keyed by deviceId, which the phone mints per pairing rather than per phone.
+ * A phone paired with two desktops holds two entries, and a push names the one
+ * it belongs to — so the desktop never has to know a phone-side identifier.
+ */
+function storageKey(deviceId: string): string {
+  return `${PUSH_KEY_PREFIX}${encodeURIComponent(deviceId)}`
 }
 
-/** Returns null when no key is stored, or when the keychain read fails — the
- *  caller falls back to local notifications rather than surfacing an error for
- *  a feature the user may never have configured. */
-export async function loadPushKey(hostId: string): Promise<string | null> {
+export async function savePushIdentity(
+  deviceId: string,
+  identity: StoredPushIdentity
+): Promise<void> {
+  await SecureStore.setItemAsync(storageKey(deviceId), JSON.stringify(identity), PUSH_KEY_OPTIONS)
+}
+
+/** Returns null when nothing is stored, the entry is unreadable, or it is
+ *  malformed — the caller falls back to local notifications rather than
+ *  surfacing an error for a feature the user may never have configured. */
+export async function loadPushIdentity(deviceId: string): Promise<StoredPushIdentity | null> {
   try {
-    return await SecureStore.getItemAsync(storageKey(hostId), PUSH_KEY_OPTIONS)
+    const raw = await SecureStore.getItemAsync(storageKey(deviceId), PUSH_KEY_OPTIONS)
+    if (!raw) {
+      return null
+    }
+    const parsed: unknown = JSON.parse(raw)
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      typeof (parsed as StoredPushIdentity).pushKeyB64 !== 'string' ||
+      typeof (parsed as StoredPushIdentity).hostId !== 'string'
+    ) {
+      return null
+    }
+    return parsed as StoredPushIdentity
   } catch {
     return null
   }
 }
 
-/** Called when a host is unpaired. Failure is ignored: the key is useless
- *  without the pairing, and a throw here would block the unpair itself. */
-export async function deletePushKey(hostId: string): Promise<void> {
+/** Called when a host is unpaired or the user turns push off for it. Failure is
+ *  ignored: the key is useless without the pairing, and a throw here would
+ *  block the unpair itself. */
+export async function deletePushIdentity(deviceId: string): Promise<void> {
   try {
-    await SecureStore.deleteItemAsync(storageKey(hostId), PUSH_KEY_OPTIONS)
+    await SecureStore.deleteItemAsync(storageKey(deviceId), PUSH_KEY_OPTIONS)
   } catch {
     // Intentionally ignored — see above.
   }

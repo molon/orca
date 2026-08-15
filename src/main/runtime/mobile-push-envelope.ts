@@ -33,8 +33,12 @@ const PUSH_KEY_BYTES = 32
 const PUSH_NONCE_BYTES = 12
 const PUSH_TAG_BYTES = 16
 
-/** What a sealed push carries, once opened. Mirrors the local-notification data
- *  shape so the tap-routing path is identical for local and remote delivery.
+/** What a sealed push carries, once opened.
+ *
+ *  Why there is no hostId: it is a phone-side identifier for a paired desktop,
+ *  assigned by the phone's host list, and the desktop has no way to know it.
+ *  The phone stores its own hostId alongside the push key and the extension
+ *  reads it back from there, so tap routing still lands on the right host.
  *
  *  Why unknown keys are stripped, not rejected: desktop and phone update
  *  independently, so a newer desktop adding an optional field must not make
@@ -42,7 +46,6 @@ const PUSH_TAG_BYTES = 16
  *  See docs/reference/remote-wire-compatibility.md, Rule 1. */
 export const MobilePushPayloadSchema = z.object({
   source: z.string().min(1).max(64),
-  hostId: z.string().min(1).max(128),
   title: z.string().max(512),
   body: z.string().max(1024),
   worktreeId: z.string().min(1).max(256).optional(),

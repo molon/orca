@@ -11,7 +11,6 @@ import {
 
 const payload: MobilePushPayload = {
   source: 'agent-task-complete',
-  hostId: 'host-1',
   title: 'Agent finished',
   body: 'claude · mobile/terminal',
   worktreeId: 'worktree-1',
@@ -97,7 +96,6 @@ describe('mobile push envelope', () => {
     // Every field is within its own limit; only the total exceeds the cap.
     const oversized: MobilePushPayload = {
       source: 's'.repeat(64),
-      hostId: 'h'.repeat(128),
       title: 't'.repeat(512),
       body: 'b'.repeat(1024),
       worktreeId: 'w'.repeat(256),
@@ -130,7 +128,6 @@ describe('mobile push envelope', () => {
     const key = generateMobilePushKey()
     const minimal: MobilePushPayload = {
       source: 'terminal-bell',
-      hostId: 'host-1',
       title: 'Bell',
       body: ''
     }

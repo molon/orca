@@ -29,7 +29,8 @@ class NotificationService: UNNotificationServiceExtension {
 
         guard
             let envelope = content.userInfo[Self.envelopeKey] as? String,
-            let hostId = Self.hostId(from: content.userInfo)
+            let deviceId = content.userInfo[Self.deviceIdKey] as? String,
+            !deviceId.isEmpty
         else {
             // Not one of ours (or an older desktop that still sends plain
             // notifications) — pass it through untouched.
@@ -37,14 +38,15 @@ class NotificationService: UNNotificationServiceExtension {
             return
         }
 
-        guard let keyBase64 = OrcaPushKeychain.loadPushKey(hostId: hostId) else {
+        guard let identity = OrcaPushKeychain.loadIdentity(deviceId: deviceId) else {
             // The usual cause is a phone that has never registered for push
             // with this host. Placeholder is the honest outcome.
             contentHandler(content)
             return
         }
 
-        guard let payload = try? OrcaPushEnvelope.open(envelope: envelope, keyBase64: keyBase64)
+        guard
+            let payload = try? OrcaPushEnvelope.open(envelope: envelope, keyBase64: identity.pushKeyB64)
         else {
             contentHandler(content)
             return
@@ -57,7 +59,9 @@ class NotificationService: UNNotificationServiceExtension {
         // serves both delivery paths.
         var userInfo = content.userInfo
         userInfo["source"] = payload.source
-        userInfo["hostId"] = payload.hostId
+        // From the stored identity, not the envelope: the desktop has no way
+        // to know the phone's id for it.
+        userInfo["hostId"] = identity.hostId
         if let worktreeId = payload.worktreeId {
             userInfo["worktreeId"] = worktreeId
         }
@@ -65,6 +69,7 @@ class NotificationService: UNNotificationServiceExtension {
             userInfo["notificationId"] = notificationId
         }
         userInfo.removeValue(forKey: Self.envelopeKey)
+        userInfo.removeValue(forKey: Self.deviceIdKey)
         content.userInfo = userInfo
 
         contentHandler(content)
@@ -79,14 +84,8 @@ class NotificationService: UNNotificationServiceExtension {
     }
 
     private static let envelopeKey = "orcaEnvelope"
+    /// Travels outside the envelope because the extension needs it before it
+    /// can decrypt anything. It names one pairing, not content.
+    private static let deviceIdKey = "orcaDeviceId"
 
-    /// The host id travels outside the envelope so the extension knows which
-    /// device key to load before it can decrypt anything. It names a pairing,
-    /// not content.
-    private static func hostId(from userInfo: [AnyHashable: Any]) -> String? {
-        guard let hostId = userInfo["hostId"] as? String, !hostId.isEmpty else {
-            return nil
-        }
-        return hostId
-    }
 }

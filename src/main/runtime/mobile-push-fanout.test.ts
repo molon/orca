@@ -10,7 +10,6 @@ import { pruneMobilePushRegistrations, type MobilePushRegistration } from './mob
 
 const payload: MobilePushPayload = {
   source: 'agent-task-complete',
-  hostId: 'host-1',
   title: 'Agent finished',
   body: 'claude · mobile/terminal',
   notificationId: 'n-1'
@@ -67,7 +66,7 @@ describe('mobile push fan-out', () => {
     const sent: MobilePushSendRequest[] = []
     await fanOutMobilePush(
       [registration('a', mobilePushKeyToBase64(generateMobilePushKey()))],
-      { source: 'terminal-bell', hostId: 'host-1', title: 'Bell', body: '' },
+      { source: 'terminal-bell', title: 'Bell', body: '' },
       async (request) => {
         sent.push(request)
         return { kind: 'sent' }
