@@ -155,12 +155,15 @@ function withExtensionTarget(config) {
     }
 
     const target = project.addTarget(TARGET_NAME, 'app_extension', TARGET_NAME)
-    project.addBuildPhase([], 'PBXSourcesBuildPhase', 'Sources', target.uuid)
+    // Why the sources are passed to addBuildPhase rather than added afterwards:
+    // a phase created empty and filled later leaves the compile step with no
+    // inputs, and the target still "succeeds" — producing an .appex holding
+    // only an Info.plist, with no binary for iOS to load. The extension then
+    // never runs and every push renders as placeholder text, with nothing in
+    // the build output to suggest anything is wrong.
+    project.addBuildPhase(SOURCE_FILES, 'PBXSourcesBuildPhase', 'Sources', target.uuid)
     project.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', target.uuid)
     project.addBuildPhase([], 'PBXFrameworksBuildPhase', 'Frameworks', target.uuid)
-    for (const file of SOURCE_FILES) {
-      project.addSourceFile(file, { target: target.uuid }, group.uuid)
-    }
 
     const bundleIdentifier = cfg.ios?.bundleIdentifier ?? ''
     const configurations = project.pbxXCBuildConfigurationSection()

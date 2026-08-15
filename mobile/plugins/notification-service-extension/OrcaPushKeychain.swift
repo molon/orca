@@ -17,8 +17,16 @@ enum OrcaPushKeychain {
     /// Must match the storageKey() prefix in push-key-store.ts.
     private static let accountPrefix = "orca:push-key:"
 
-    static func loadPushKey(hostId: String) -> String? {
-        guard let account = accountName(hostId: hostId) else {
+    /// What the extension needs to render and route one push.
+    struct Identity: Decodable {
+        let pushKeyB64: String
+        /// The phone's own id for the paired desktop. The desktop cannot know
+        /// it, so it is stored here rather than sealed into the envelope.
+        let hostId: String
+    }
+
+    static func loadIdentity(deviceId: String) -> Identity? {
+        guard let account = accountName(deviceId: deviceId) else {
             return nil
         }
         var query: [String: Any] = [
@@ -37,22 +45,22 @@ enum OrcaPushKeychain {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data,
-              let value = String(data: data, encoding: .utf8)
+              let identity = try? JSONDecoder().decode(Identity.self, from: data)
         else {
             return nil
         }
-        return value
+        return identity
     }
 
-    /// Mirrors `encodeURIComponent(hostId)` on the JS side, so an exotic host id
+    /// Mirrors `encodeURIComponent(deviceId)` on the JS side, so an exotic id
     /// resolves to the same account name on both sides.
-    private static func accountName(hostId: String) -> String? {
+    private static func accountName(deviceId: String) -> String? {
         // encodeURIComponent leaves these unescaped; everything else is
         // percent-encoded uppercase.
         let unreserved = CharacterSet(
             charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
         )
-        guard let encoded = hostId.addingPercentEncoding(withAllowedCharacters: unreserved) else {
+        guard let encoded = deviceId.addingPercentEncoding(withAllowedCharacters: unreserved) else {
             return nil
         }
         return accountPrefix + encoded
