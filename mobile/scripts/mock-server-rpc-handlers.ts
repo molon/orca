@@ -136,6 +136,18 @@ export function handleRequest(
   }
 
   switch (request.method) {
+    // Why the mock owns these: remote push cannot be exercised end to end
+    // without a host that mints a key, and the whole point of the mock server
+    // is to run the phone against something without a real desktop.
+    case 'notifications.registerPushDevice': {
+      const params = request.params as { deviceId?: string } | undefined
+      const deviceId = typeof params?.deviceId === 'string' ? params.deviceId : 'mock-device'
+      respond(success(request.id, { pushKeyB64: mockPushKeyFor(deviceId) }))
+      return true
+    }
+    case 'notifications.unregisterPushDevice':
+      respond(success(request.id, { unregistered: true }))
+      return true
     case 'status.get':
       respond(
         success(request.id, {
@@ -298,4 +310,14 @@ export function handleRequest(
     default:
       respond(error(request.id, 'method_not_found', `Unknown method: ${request.method}`))
   }
+}
+
+// Deterministic so a test harness can seal an envelope for this device without
+// scraping the key out of the phone. Never used outside the mock server.
+function mockPushKeyFor(deviceId: string): string {
+  const key = Buffer.alloc(32)
+  for (let i = 0; i < key.length; i++) {
+    key[i] = (deviceId.charCodeAt(i % deviceId.length) + i * 7) & 0xff
+  }
+  return key.toString('base64')
 }

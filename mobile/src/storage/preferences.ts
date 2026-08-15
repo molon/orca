@@ -30,6 +30,19 @@ export async function savePushNotificationsEnabled(enabled: boolean): Promise<vo
   await AsyncStorage.setItem(NOTIF_KEY, String(enabled))
 }
 
+const DELIVERY_MODE_KEY = 'orca:notificationDeliveryMode'
+
+// Why a raw string rather than a parsed union: the parsing lives beside the
+// decision logic in notification-delivery-mode.ts, so an unknown stored value
+// resolves the same way everywhere.
+export async function loadNotificationDeliveryMode(): Promise<string | null> {
+  return AsyncStorage.getItem(DELIVERY_MODE_KEY)
+}
+
+export async function saveNotificationDeliveryMode(mode: string): Promise<void> {
+  await AsyncStorage.setItem(DELIVERY_MODE_KEY, mode)
+}
+
 const TEXT_SCALE_KEY = 'orca:terminalTextScale'
 
 // Why: the mobile terminal fits the desktop's full column count to the phone

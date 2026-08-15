@@ -33,6 +33,7 @@ import {
 } from '../src/transport/home-host-auto-connect'
 import { classifyConnection } from '../src/transport/connection-health'
 import { subscribeToDesktopNotifications } from '../src/notifications/mobile-notifications'
+import { registerPushDeviceForHost } from '../src/notifications/push-device-connect'
 import {
   loadMobileOnboardingSteps,
   mobileOnboardingDestination
@@ -449,6 +450,10 @@ export default function HomeScreen() {
         if (!unsubNotif) {
           unsubNotif = subscribeToDesktopNotifications(entry.client, entry.hostId)
         }
+        // Why on every connect rather than once: a known device keeps its key,
+        // so this is idempotent, and it re-establishes registration after an
+        // APNs token rotation or a desktop that forgot its registry.
+        void registerPushDeviceForHost(entry.client, entry.hostId)
         if (!unsubAccounts) {
           unsubAccounts = entry.client.subscribe('accounts.subscribe', null, (payload) => {
             if (!payload || typeof payload !== 'object') {
