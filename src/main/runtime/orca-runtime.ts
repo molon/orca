@@ -999,6 +999,14 @@ import {
   MobileNotificationReplayBuffer,
   type ReplayableMobileNotification
 } from './mobile-notification-replay'
+import { fanOutMobilePush, type MobilePushSender } from './mobile-push-fanout'
+import { registerMobilePushDevice, unregisterMobilePushDevice } from './mobile-push-registration'
+import {
+  listMobilePushRegistrations,
+  pruneMobilePushRegistrations,
+  type MobilePushRegistryState
+} from './mobile-push-registry'
+import { loadMobilePushRegistry, saveMobilePushRegistry } from './mobile-push-registry-store'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import {
   createMobileSessionTabsNotifyCoalescer,
@@ -12808,6 +12816,52 @@ export class OrcaRuntimeService {
   // idempotent-by-seq source of truth; clients watermark their own position.
   private readonly mobileNotificationReplay = new MobileNotificationReplayBuffer()
 
+  // Why lazy, like the orchestration DB above: the path depends on Electron's
+  // userData, which is not finalized until after app.ready.
+  private _mobilePushRegistry: MobilePushRegistryState | null = null
+
+  private mobilePushUserDataPath(): string {
+    const { app } = require('electron')
+    return app.getPath('userData') as string
+  }
+
+  private getMobilePushRegistry(): MobilePushRegistryState {
+    this._mobilePushRegistry ??= loadMobilePushRegistry(this.mobilePushUserDataPath())
+    return this._mobilePushRegistry
+  }
+
+  private setMobilePushRegistry(state: MobilePushRegistryState): void {
+    this._mobilePushRegistry = state
+    saveMobilePushRegistry(this.mobilePushUserDataPath(), state)
+  }
+
+  /** Registers or refreshes one phone and returns the key it decrypts with. */
+  registerMobilePushDevice(request: {
+    deviceId: string
+    deviceToken: string
+    label?: string
+  }): string {
+    const { state, pushKeyB64 } = registerMobilePushDevice(this.getMobilePushRegistry(), {
+      ...request,
+      nowMs: Date.now()
+    })
+    this.setMobilePushRegistry(state)
+    return pushKeyB64
+  }
+
+  unregisterMobilePushDevice(deviceId: string): void {
+    this.setMobilePushRegistry(unregisterMobilePushDevice(this.getMobilePushRegistry(), deviceId))
+  }
+
+  /** Injected by the desktop layer, which owns the HTTP client and its
+   *  configuration. Absent means no push server is configured, which is the
+   *  normal state — the local path keeps working untouched. */
+  private mobilePushSender: MobilePushSender | null = null
+
+  setMobilePushSender(sender: MobilePushSender | null): void {
+    this.mobilePushSender = sender
+  }
+
   dispatchMobileNotification(event: MobileNotificationEvent): void {
     const seq = this.mobileNotificationReplay.record(event)
     // Why: surface the desktop-assigned seq to live listeners so they can watermark the last event
@@ -12822,6 +12876,49 @@ export class OrcaRuntimeService {
         }),
       'mobile-notification'
     )
+    // Why not awaited: dispatch is called from terminal and agent hot paths
+    // that must not block on a network round trip to the push server.
+    void this.fanOutMobilePushNotification(event)
+  }
+
+  /**
+   * Seals this event for every registered phone and sends it.
+   *
+   * Why dismissals are skipped: the payload schema carries a title and body,
+   * and a dismissal has neither. Collapsing a stale banner remotely needs its
+   * own APNs shape, so it stays on the live stream until that exists.
+   */
+  private async fanOutMobilePushNotification(event: MobileNotificationEvent): Promise<void> {
+    const sender = this.mobilePushSender
+    if (!sender || event.type !== 'notification') {
+      return
+    }
+    const registrations = listMobilePushRegistrations(this.getMobilePushRegistry())
+    if (registrations.length === 0) {
+      return
+    }
+    try {
+      const outcome = await fanOutMobilePush(
+        registrations,
+        {
+          source: event.source,
+          title: event.title,
+          body: event.body,
+          ...(event.worktreeId ? { worktreeId: event.worktreeId } : {}),
+          ...(event.notificationId ? { notificationId: event.notificationId } : {})
+        },
+        sender
+      )
+      if (outcome.unregisteredDeviceIds.size > 0) {
+        this.setMobilePushRegistry(
+          pruneMobilePushRegistrations(this.getMobilePushRegistry(), outcome.unregisteredDeviceIds)
+        )
+      }
+    } catch {
+      // Why swallowed: push is an enhancement over a local path that already
+      // delivered this event. A failure here must never surface as an
+      // unhandled rejection in a terminal or agent hot path.
+    }
   }
 
   // Returns notifications dispatched after lastSeenSeq. Idempotent: the same

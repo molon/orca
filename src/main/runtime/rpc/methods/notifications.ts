@@ -29,6 +29,24 @@ const NotificationGetMissedSinceParams = z.object({
   epoch: z.string().optional()
 })
 
+// Why: remote push needs a per-device key that outlives any socket, since a
+// push is sealed at dispatch and opened much later — possibly after the app was
+// killed. The desktop mints it and returns it over this already end-to-end
+// encrypted channel, so it is never exposed to the relay or the push server.
+//
+// The device token is opaque here: a real APNs token on device, a synthetic
+// string in development, and simulator tokens are far longer than the 64 hex
+// characters a device returns. Only the sender interprets it.
+const NotificationRegisterPushDeviceParams = z.object({
+  deviceId: z.string().min(1).max(128),
+  deviceToken: z.string().min(1).max(512),
+  label: z.string().max(128).optional()
+})
+
+const NotificationUnregisterPushDeviceParams = z.object({
+  deviceId: z.string().min(1).max(128)
+})
+
 // Why: notifications.subscribe streams desktop notification events to mobile
 // clients over WebSocket. The mobile client shows a local push notification
 // for each event. This avoids requiring Firebase/APNs — the existing
@@ -80,6 +98,32 @@ export const NOTIFICATION_METHODS: readonly RpcAnyMethod[] = [
     handler: async (params, { runtime }) => {
       const missed = runtime.getMissedNotificationsSince(params.lastSeenSeq, params.epoch)
       return { notifications: missed, epoch: runtime.getMobileNotificationEpoch() }
+    }
+  }),
+  defineMethod({
+    name: 'notifications.registerPushDevice',
+    params: NotificationRegisterPushDeviceParams,
+    // Why re-registering is safe to call on every launch: a known device keeps
+    // its key, so the phone can register unconditionally rather than tracking
+    // whether it already did.
+    handler: async (params, { runtime }) => {
+      const pushKeyB64 = runtime.registerMobilePushDevice({
+        deviceId: params.deviceId,
+        deviceToken: params.deviceToken,
+        ...(params.label ? { label: params.label } : {})
+      })
+      return { pushKeyB64 }
+    }
+  }),
+  defineMethod({
+    name: 'notifications.unregisterPushDevice',
+    params: NotificationUnregisterPushDeviceParams,
+    // Why this is needed even though APNs prunes dead tokens: a user switching
+    // this phone to local-only delivery expects push to stop now, and the
+    // token is still perfectly valid so Apple would never report it gone.
+    handler: async (params, { runtime }) => {
+      runtime.unregisterMobilePushDevice(params.deviceId)
+      return { unregistered: true }
     }
   })
 ]
