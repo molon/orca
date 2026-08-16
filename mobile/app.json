@@ -80,7 +80,12 @@
     "plugins": [
       "expo-router",
       "./plugins/android-respect-rotation-lock.js",
-      "./plugins/notification-service-extension",
+      [
+        "./plugins/notification-service-extension",
+        {
+          "appleTeamId": "PDL85JB6BQ"
+        }
+      ],
       [
         "expo-splash-screen",
         {

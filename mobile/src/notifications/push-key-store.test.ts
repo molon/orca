@@ -10,6 +10,10 @@ vi.mock('expo-secure-store', () => ({
   deleteItemAsync: vi.fn(async () => undefined)
 }))
 
+vi.mock('expo-constants', () => ({
+  default: { expoConfig: { extra: { orcaPushKeychainAccessGroup: 'TEAM1.com.example.app.push' } } }
+}))
+
 const setItemAsync = vi.mocked(SecureStore.setItemAsync)
 const getItemAsync = vi.mocked(SecureStore.getItemAsync)
 const deleteItemAsync = vi.mocked(SecureStore.deleteItemAsync)
@@ -35,6 +39,17 @@ describe('push key store', () => {
   it('keeps the key off backups and iCloud Keychain', async () => {
     await savePushIdentity('dev-1', { pushKeyB64: 'key-b64', hostId: 'host-1' })
     expect(String(setItemAsync.mock.calls[0]![2]?.keychainAccessible)).toContain('this-device-only')
+  })
+
+  // The entitlement alone shares nothing: a write without the group lands in
+  // the app's default group, where the extension cannot see it, and every push
+  // silently renders as placeholder text.
+  it('writes into the group the extension reads', async () => {
+    await savePushIdentity('dev-1', { pushKeyB64: 'key-b64', hostId: 'host-1' })
+    getItemAsync.mockResolvedValueOnce(null)
+    await loadPushIdentity('dev-1')
+    expect(setItemAsync.mock.calls[0]![2]?.accessGroup).toBe('TEAM1.com.example.app.push')
+    expect(getItemAsync.mock.calls[0]![1]?.accessGroup).toBe('TEAM1.com.example.app.push')
   })
 
   it('reads back with the same options it wrote with', async () => {

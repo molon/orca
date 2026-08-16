@@ -20,18 +20,30 @@ const SOURCE_FILES = [
 ]
 // Info.plist key the extension reads to find the shared keychain group.
 const ACCESS_GROUP_INFO_KEY = 'OrcaPushKeychainAccessGroup'
+// Where the app's JS side reads the same group from, so it writes the key into
+// the group the extension reads rather than the app's default one.
+const ACCESS_GROUP_EXTRA_KEY = 'orcaPushKeychainAccessGroup'
 
-function appGroupFor(bundleIdentifier) {
-  return `group.${bundleIdentifier}.push`
-}
-
-function keychainGroupFor(bundleIdentifier) {
-  return `${bundleIdentifier}.push`
+/** Keychain groups must carry the team prefix, so both sides are written as
+ *  literals rather than `$(AppIdentifierPrefix)`: the JS side has no way to
+ *  expand a build variable, and it has to name the identical string. */
+function keychainGroupsFor(bundleIdentifier, appleTeamId) {
+  if (!appleTeamId) {
+    return null
+  }
+  return {
+    // First entry is the default group for items stored without an explicit
+    // one. Keeping the plain app identifier first leaves every other secret —
+    // the pairing credentials above all — where it already was, out of reach
+    // of the extension.
+    appDefault: `${appleTeamId}.${bundleIdentifier}`,
+    shared: `${appleTeamId}.${bundleIdentifier}.push`
+  }
 }
 
 /** Copies the Swift sources and the extension Info.plist into the generated
  *  ios/ tree. prebuild wipes that tree, so this reruns every time. */
-function withExtensionSources(config) {
+function withExtensionSources(config, appleTeamId) {
   return withDangerousMod(config, [
     'ios',
     async (cfg) => {
@@ -45,15 +57,15 @@ function withExtensionSources(config) {
         fs.copyFileSync(path.join(sourceDir, file), path.join(targetDir, file))
       }
 
-      const bundleIdentifier = cfg.ios?.bundleIdentifier ?? ''
+      const groups = keychainGroupsFor(cfg.ios?.bundleIdentifier ?? '', appleTeamId)
       fs.writeFileSync(
         path.join(targetDir, 'Info.plist'),
-        buildExtensionInfoPlist(keychainGroupFor(bundleIdentifier)),
+        buildExtensionInfoPlist(groups?.shared),
         'utf8'
       )
       fs.writeFileSync(
         path.join(targetDir, `${TARGET_NAME}.entitlements`),
-        buildExtensionEntitlements(bundleIdentifier),
+        buildExtensionEntitlements(groups?.shared),
         'utf8'
       )
       return cfg
@@ -61,7 +73,15 @@ function withExtensionSources(config) {
   ])
 }
 
-function buildExtensionInfoPlist(keychainGroup) {
+/** Without a team id there is no valid group name, so the key is left out and
+ *  the extension falls back to placeholder text rather than reading the wrong
+ *  keychain group. */
+function buildExtensionInfoPlist(sharedGroup) {
+  const accessGroupEntry = sharedGroup
+    ? `
+    <key>${ACCESS_GROUP_INFO_KEY}</key>
+    <string>${sharedGroup}</string>`
+    : ''
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -70,6 +90,11 @@ function buildExtensionInfoPlist(keychainGroup) {
     <string>${TARGET_NAME}</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <!-- Xcode supplies this for its own templates but not for a plist written
+         by hand: without it iOS cannot tell which binary the extension runs,
+         and installing the app fails outright on the extension placeholder. -->
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
     <key>CFBundlePackageType</key>
@@ -77,9 +102,7 @@ function buildExtensionInfoPlist(keychainGroup) {
     <key>CFBundleShortVersionString</key>
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
-    <string>$(CURRENT_PROJECT_VERSION)</string>
-    <key>${ACCESS_GROUP_INFO_KEY}</key>
-    <string>$(AppIdentifierPrefix)${keychainGroup}</string>
+    <string>$(CURRENT_PROJECT_VERSION)</string>${accessGroupEntry}
     <key>NSExtension</key>
     <dict>
       <key>NSExtensionPointIdentifier</key>
@@ -92,19 +115,18 @@ function buildExtensionInfoPlist(keychainGroup) {
 `
 }
 
-function buildExtensionEntitlements(bundleIdentifier) {
+function buildExtensionEntitlements(sharedGroup) {
+  const groups = sharedGroup
+    ? `
+    <key>keychain-access-groups</key>
+    <array>
+      <string>${sharedGroup}</string>
+    </array>`
+    : ''
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
-    <key>com.apple.security.application-groups</key>
-    <array>
-      <string>${appGroupFor(bundleIdentifier)}</string>
-    </array>
-    <key>keychain-access-groups</key>
-    <array>
-      <string>$(AppIdentifierPrefix)${keychainGroupFor(bundleIdentifier)}</string>
-    </array>
+  <dict>${groups}
   </dict>
 </plist>
 `
@@ -112,24 +134,29 @@ function buildExtensionEntitlements(bundleIdentifier) {
 
 /** The app writes the push key; the extension reads it. Both need the same
  *  keychain access group or the extension's lookup silently returns nothing. */
-function withSharedKeychainGroup(config) {
-  const withGroups = withEntitlementsPlist(config, (cfg) => {
-    const bundleIdentifier = cfg.ios?.bundleIdentifier ?? ''
-    cfg.modResults['com.apple.security.application-groups'] = [appGroupFor(bundleIdentifier)]
-    cfg.modResults['keychain-access-groups'] = [
-      `$(AppIdentifierPrefix)${keychainGroupFor(bundleIdentifier)}`
-    ]
+function withSharedKeychainGroup(config, appleTeamId) {
+  const groups = keychainGroupsFor(config.ios?.bundleIdentifier ?? '', appleTeamId)
+  if (!groups) {
+    // Nothing to share without a team id. Granting no group at all keeps the
+    // app on its default keychain group, which is what every other secret
+    // already uses; naming an unresolvable one breaks all of them.
+    return config
+  }
+  const withExtra = {
+    ...config,
+    extra: { ...config.extra, [ACCESS_GROUP_EXTRA_KEY]: groups.shared }
+  }
+  const withGroups = withEntitlementsPlist(withExtra, (cfg) => {
+    cfg.modResults['keychain-access-groups'] = [groups.appDefault, groups.shared]
     return cfg
   })
   return withInfoPlist(withGroups, (cfg) => {
-    const bundleIdentifier = cfg.ios?.bundleIdentifier ?? ''
-    cfg.modResults[ACCESS_GROUP_INFO_KEY] =
-      `$(AppIdentifierPrefix)${keychainGroupFor(bundleIdentifier)}`
+    cfg.modResults[ACCESS_GROUP_INFO_KEY] = groups.shared
     return cfg
   })
 }
 
-function withExtensionTarget(config) {
+function withExtensionTarget(config, appleTeamId) {
   return withXcodeProject(config, (cfg) => {
     const project = cfg.modResults
     if (project.pbxTargetByName(TARGET_NAME)) {
@@ -169,11 +196,24 @@ function withExtensionTarget(config) {
     const configurations = project.pbxXCBuildConfigurationSection()
     for (const key of Object.keys(configurations)) {
       const settings = configurations[key].buildSettings
-      if (!settings || settings.PRODUCT_NAME !== `"${TARGET_NAME}"`) {
+      if (!settings) {
+        continue
+      }
+      // Every target needs it: signing an app whose entitlements name a
+      // team-prefixed keychain group fails if the build has no team.
+      if (appleTeamId && settings.PRODUCT_NAME) {
+        settings.DEVELOPMENT_TEAM = appleTeamId
+      }
+      if (settings.PRODUCT_NAME !== `"${TARGET_NAME}"`) {
         continue
       }
       settings.PRODUCT_BUNDLE_IDENTIFIER = `"${bundleIdentifier}.${TARGET_NAME}"`
       settings.INFOPLIST_FILE = `"${TARGET_NAME}/Info.plist"`
+      // Both come from app.json so the extension always reports the same
+      // version as the app; a mismatch is rejected at submission. Left unset
+      // they expand to nothing and the version keys vanish from the bundle.
+      settings.MARKETING_VERSION = cfg.version ?? '1.0.0'
+      settings.CURRENT_PROJECT_VERSION = cfg.ios?.buildNumber ?? '1'
       settings.CODE_SIGN_ENTITLEMENTS = `"${TARGET_NAME}/${TARGET_NAME}.entitlements"`
       settings.SWIFT_VERSION = '5.0'
       settings.CODE_SIGN_STYLE = 'Automatic'
@@ -187,6 +227,13 @@ function withExtensionTarget(config) {
   })
 }
 
-module.exports = function withNotificationServiceExtension(config) {
-  return withExtensionTarget(withSharedKeychainGroup(withExtensionSources(config)))
+/** `appleTeamId` is what makes push decryption possible: without it the app and
+ *  the extension cannot name a shared keychain group, so the extension gets no
+ *  key and every push renders as placeholder text. Everything else still
+ *  builds, which is why this is an option rather than a hard requirement. */
+module.exports = function withNotificationServiceExtension(config, { appleTeamId } = {}) {
+  return withExtensionTarget(
+    withSharedKeychainGroup(withExtensionSources(config, appleTeamId), appleTeamId),
+    appleTeamId
+  )
 }
