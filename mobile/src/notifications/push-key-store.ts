@@ -1,4 +1,11 @@
 import * as SecureStore from 'expo-secure-store'
+import Constants from 'expo-constants'
+
+// Injected by the notification-service-extension plugin, which derives it from
+// the Apple team id. Absent when the build has no team: the extension then has
+// no group either, so both sides agree there is nothing to share and push
+// falls back to placeholder text.
+const accessGroup = Constants.expoConfig?.extra?.orcaPushKeychainAccessGroup
 
 // Why AFTER_FIRST_UNLOCK rather than the WHEN_UNLOCKED level the pairing
 // credentials use: a push most often arrives while the phone is locked in a
@@ -15,7 +22,10 @@ const PUSH_KEY_OPTIONS: SecureStore.SecureStoreOptions = {
   // Why its own service: the extension reads through a shared keychain access
   // group, and keeping this out of the pairing service avoids widening what
   // the extension process can reach to just these entries.
-  keychainService: 'orca.push.v1'
+  keychainService: 'orca.push.v1',
+  // Without this the key lands in the app's default group, which the extension
+  // cannot read — the entitlement alone shares nothing.
+  ...(typeof accessGroup === 'string' ? { accessGroup } : {})
 }
 
 const PUSH_KEY_PREFIX = 'orca:push-key:'
