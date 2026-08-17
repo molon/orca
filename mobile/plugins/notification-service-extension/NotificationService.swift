@@ -78,20 +78,29 @@ class NotificationService: UNNotificationServiceExtension {
         orcaPushDiag("ok")
         content.title = payload.title
         content.body = payload.body
-        // The tap route reads these, and they must match what the local
-        // notification path puts in its data so one routing implementation
-        // serves both delivery paths.
+        // The tap route reads these, so one routing implementation serves both
+        // delivery paths.
+        //
+        // Why nested under "body" rather than set at the top level: for a
+        // remote notification expo-notifications exposes `content.data` as
+        // userInfo["body"], while for a local one it exposes the whole
+        // dictionary. Writing these flat leaves data empty on the tap route,
+        // so the notification opens the app and goes nowhere — with nothing
+        // to distinguish it from a routing bug.
         var userInfo = content.userInfo
-        userInfo["source"] = payload.source
-        // From the stored identity, not the envelope: the desktop has no way
-        // to know the phone's id for it.
-        userInfo["hostId"] = identity.hostId
+        var routing: [String: Any] = [
+            "source": payload.source,
+            // From the stored identity, not the envelope: the desktop has no
+            // way to know the phone's id for it.
+            "hostId": identity.hostId
+        ]
         if let worktreeId = payload.worktreeId {
-            userInfo["worktreeId"] = worktreeId
+            routing["worktreeId"] = worktreeId
         }
         if let notificationId = payload.notificationId {
-            userInfo["notificationId"] = notificationId
+            routing["notificationId"] = notificationId
         }
+        userInfo["body"] = routing
         userInfo.removeValue(forKey: Self.envelopeKey)
         userInfo.removeValue(forKey: Self.deviceIdKey)
         content.userInfo = userInfo
