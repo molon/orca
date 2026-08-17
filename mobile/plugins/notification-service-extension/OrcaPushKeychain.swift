@@ -1,6 +1,5 @@
 import Foundation
 import Security
-
 /// Reads the per-device push key the app stored.
 ///
 /// Why this can read it at all: the app writes the key with
@@ -12,10 +11,20 @@ import Security
 /// The service name and key layout must match that file. They are duplicated
 /// rather than shared because nothing crosses the JS/Swift boundary here.
 enum OrcaPushKeychain {
-    /// Must match PUSH_KEY_OPTIONS.keychainService in push-key-store.ts.
-    private static let service = "orca.push.v1"
+    /// The service names expo-secure-store may have stored the entry under.
+    ///
+    /// It does not use the configured name verbatim: it appends `:no-auth` or
+    /// `:auth` depending on requireAuthentication, and older versions wrote the
+    /// bare name. Its own reader tries all three, so the JS side never notices
+    /// — only a second process querying by hand does, and it finds nothing with
+    /// no error to explain why.
+    ///
+    /// Ordered by what this app actually writes: it never requires
+    /// authentication, so `:no-auth` is the hit; the bare name is a fallback
+    /// for entries written before that suffix existed.
+    private static let services = ["orca.push.v1:no-auth", "orca.push.v1"]
     /// Must match the storageKey() prefix in push-key-store.ts.
-    private static let accountPrefix = "orca:push-key:"
+    private static let accountPrefix = "orca.push-key."
 
     /// What the extension needs to render and route one push.
     struct Identity: Decodable {
@@ -26,13 +35,24 @@ enum OrcaPushKeychain {
     }
 
     static func loadIdentity(deviceId: String) -> Identity? {
-        guard let account = accountName(deviceId: deviceId) else {
-            return nil
+        let account = accountPrefix + deviceId
+        for service in Self.services {
+            if let identity = loadIdentity(account: account, service: service) {
+                return identity
+            }
         }
+        return nil
+    }
+
+    private static func loadIdentity(account: String, service: String) -> Identity? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            // Data, not String: expo-secure-store stores the account as raw
+            // UTF-8 bytes, and the keychain will not match a String attribute
+            // against a Data one. A String here finds nothing, reports no
+            // error, and every push renders as placeholder text.
+            kSecAttrAccount as String: Data(account.utf8),
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -43,27 +63,14 @@ enum OrcaPushKeychain {
         }
 
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess,
               let data = item as? Data,
               let identity = try? JSONDecoder().decode(Identity.self, from: data)
         else {
             return nil
         }
         return identity
-    }
-
-    /// Mirrors `encodeURIComponent(deviceId)` on the JS side, so an exotic id
-    /// resolves to the same account name on both sides.
-    private static func accountName(deviceId: String) -> String? {
-        // encodeURIComponent leaves these unescaped; everything else is
-        // percent-encoded uppercase.
-        let unreserved = CharacterSet(
-            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
-        )
-        guard let encoded = deviceId.addingPercentEncoding(withAllowedCharacters: unreserved) else {
-            return nil
-        }
-        return accountPrefix + encoded
     }
 
     /// Injected at build time by the config plugin, since the app group name

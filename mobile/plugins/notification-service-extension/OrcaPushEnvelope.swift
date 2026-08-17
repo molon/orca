@@ -12,7 +12,10 @@ import Foundation
 enum OrcaPushEnvelope {
     struct Payload: Decodable {
         let source: String
-        let hostId: String
+        // No hostId: the desktop cannot know the phone's id for it, so it
+        // never seals one in. It comes from the stored identity instead.
+        // Declaring it here made every real envelope fail to decode, while
+        // hand-written fixtures that included it kept passing.
         let title: String
         let body: String
         let worktreeId: String?

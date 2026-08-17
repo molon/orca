@@ -1,5 +1,24 @@
 import UserNotifications
 
+// Compiled in only when ORCA_PUSH_DIAG is set at prebuild time. It stays out
+// of shipping builds on purpose: a Darwin notification is readable by any
+// process on the device, so broadcasting that a push just decrypted would leak
+// exactly what the envelope exists to hide. Behind the flag it is the only way
+// to observe an extension from another machine — os_log needs a cable, and the
+// notification itself is the thing under test.
+#if ORCA_PUSH_DIAG
+    import Foundation
+
+    func orcaPushDiag(_ step: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("orca.diag.\(step)" as CFString),
+            nil, nil, true)
+    }
+#else
+    @inline(__always) func orcaPushDiag(_: String) {}
+#endif
+
 /// Replaces the placeholder alert with the decrypted notification text.
 ///
 /// The push server and APNs only ever carry ciphertext, so the alert that
@@ -18,6 +37,7 @@ class NotificationService: UNNotificationServiceExtension {
         _ request: UNNotificationRequest,
         withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
     ) {
+        orcaPushDiag("entered")
         self.contentHandler = contentHandler
         let content = request.content.mutableCopy() as? UNMutableNotificationContent
         bestAttempt = content
@@ -34,6 +54,7 @@ class NotificationService: UNNotificationServiceExtension {
         else {
             // Not one of ours (or an older desktop that still sends plain
             // notifications) — pass it through untouched.
+            orcaPushDiag("nopayload")
             contentHandler(content)
             return
         }
@@ -41,6 +62,7 @@ class NotificationService: UNNotificationServiceExtension {
         guard let identity = OrcaPushKeychain.loadIdentity(deviceId: deviceId) else {
             // The usual cause is a phone that has never registered for push
             // with this host. Placeholder is the honest outcome.
+            orcaPushDiag("nokey")
             contentHandler(content)
             return
         }
@@ -48,10 +70,12 @@ class NotificationService: UNNotificationServiceExtension {
         guard
             let payload = try? OrcaPushEnvelope.open(envelope: envelope, keyBase64: identity.pushKeyB64)
         else {
+            orcaPushDiag("openfail")
             contentHandler(content)
             return
         }
 
+        orcaPushDiag("ok")
         content.title = payload.title
         content.body = payload.body
         // The tap route reads these, and they must match what the local
