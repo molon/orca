@@ -1007,6 +1007,7 @@ import {
   type MobilePushRegistryState
 } from './mobile-push-registry'
 import { loadMobilePushRegistry, saveMobilePushRegistry } from './mobile-push-registry-store'
+import { createMobilePushRelaySender, loadMobilePushRelayConfig } from './mobile-push-relay-sender'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import {
   createMobileSessionTabsNotifyCoalescer,
@@ -12862,6 +12863,28 @@ export class OrcaRuntimeService {
     this.mobilePushSender = sender
   }
 
+  /**
+   * Installs the relay sender when the operator has configured one.
+   *
+   * Why the runtime reads its own config rather than being handed a sender:
+   * the registry it fans out to already lives beside this file, and a phone
+   * that registers is useless until something can actually send to it. Wiring
+   * them in two different places is how the send path ended up defined and
+   * never installed.
+   */
+  private ensureMobilePushSender(): void {
+    if (this.mobilePushSender || this.mobilePushSenderResolved) {
+      return
+    }
+    this.mobilePushSenderResolved = true
+    const config = loadMobilePushRelayConfig(this.mobilePushUserDataPath())
+    if (config) {
+      this.mobilePushSender = createMobilePushRelaySender(config)
+    }
+  }
+
+  private mobilePushSenderResolved = false
+
   dispatchMobileNotification(event: MobileNotificationEvent): void {
     const seq = this.mobileNotificationReplay.record(event)
     // Why: surface the desktop-assigned seq to live listeners so they can watermark the last event
@@ -12889,6 +12912,7 @@ export class OrcaRuntimeService {
    * own APNs shape, so it stays on the live stream until that exists.
    */
   private async fanOutMobilePushNotification(event: MobileNotificationEvent): Promise<void> {
+    this.ensureMobilePushSender()
     const sender = this.mobilePushSender
     if (!sender || event.type !== 'notification') {
       return
