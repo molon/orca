@@ -45,7 +45,10 @@ const devChannelRepo = isMacHourly
     : isMacAdhoc
       ? 'orca-adhoc'
       : null
-const appId = 'com.stablyai.orca'
+// Why not the upstream id: this is a fork, and macOS treats the bundle id as
+// the app's identity — sharing it with the official build makes the two
+// indistinguishable to the OS, from notification settings to login items.
+const appId = 'com.molon.orca'
 const featureWallResources = {
   from: 'resources/onboarding/feature-wall',
   to: 'onboarding/feature-wall'

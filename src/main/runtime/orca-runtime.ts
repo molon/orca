@@ -1146,7 +1146,10 @@ import {
   type MobilePushRegistryState
 } from './mobile-push-registry'
 import { loadMobilePushRegistry, saveMobilePushRegistry } from './mobile-push-registry-store'
-import { createMobilePushRelaySender, loadMobilePushRelayConfig } from './mobile-push-relay-sender'
+import {
+  createMobilePushProviderSender,
+  loadMobilePushProviderConfig
+} from './mobile-push-provider-sender'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
 import {
   createMobileSessionTabsNotifyCoalescer,
@@ -9125,7 +9128,7 @@ export class OrcaRuntimeService {
       // Why: a runtime-owned headless tab is absent from renderer state, so the
       // closeTerminalTab relay below would ack success without killing its PTY,
       // and syncMobileSessionTabs would republish the "closed" tab. Only bypass
-      // the relay when no renderer owns the parent: an adopted tab needs the
+      // the provider when no renderer owns the parent: an adopted tab needs the
       // renderer's live pin guard and durable close transaction.
       if (closingWholeParent && !this.tabs.has(tab.parentTabId)) {
         this.closeHeadlessMobileTerminalTab(worktreeId, snapshot!, tab, {
@@ -14124,7 +14127,7 @@ export class OrcaRuntimeService {
   }
 
   /**
-   * Installs the relay sender when the operator has configured one.
+   * Installs the provider sender when the operator has configured one.
    *
    * Why the runtime reads its own config rather than being handed a sender:
    * the registry it fans out to already lives beside this file, and a phone
@@ -14137,9 +14140,9 @@ export class OrcaRuntimeService {
       return
     }
     this.mobilePushSenderResolved = true
-    const config = loadMobilePushRelayConfig(this.mobilePushUserDataPath())
+    const config = loadMobilePushProviderConfig(this.mobilePushUserDataPath())
     if (config) {
-      this.mobilePushSender = createMobilePushRelaySender(config)
+      this.mobilePushSender = createMobilePushProviderSender(config)
     }
   }
 
@@ -18814,7 +18817,7 @@ export class OrcaRuntimeService {
       return false
     }
     // Why: foregroundAgent is only consulted as the owner fallback when
-    // launchAgent is unknown, so a known launchAgent makes the relay
+    // launchAgent is unknown, so a known launchAgent makes the provider
     // getForegroundProcess round-trip pure waste (covers all launched agents).
     if (pty.launchAgent) {
       return false
@@ -28432,7 +28435,7 @@ export class OrcaRuntimeService {
     }
     // Why: mobile may be iOS while the shell host is Windows/macOS/Linux or SSH Linux; quote for the host shell.
     const platform = this.getAgentLaunchPlatformForWorkspace(workspace)
-    // Why: SSH runs the CLI through the relay shim (plain `orca`), so the Linux-only `orca-ide` rename must not apply.
+    // Why: SSH runs the CLI through the provider shim (plain `orca`), so the Linux-only `orca-ide` rename must not apply.
     const isRemote = workspace.repo ? repoIsRemote(workspace.repo) : repoIsRemote(workspace)
     const queuedShell = resolveLocalWindowsAgentStartupShell({
       platform,

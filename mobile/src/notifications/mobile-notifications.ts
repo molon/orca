@@ -1,4 +1,5 @@
 import type { RpcClient } from '../transport/rpc-client'
+import { shouldDeliverLocally } from './push-delivery-state'
 // Re-exported so the existing importers (and their vi.mock paths) keep working.
 export {
   ensureNotificationPermissions,
@@ -84,7 +85,11 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     adoptNotificationEpoch(session, hostId, event.notificationEpoch)
     const epochAtDelivery = session.lastDeliveredEpoch
     if (type === 'notification') {
-      await showLocalNotification(event as NotificationEvent, hostId)
+      // Skipped when push is delivering this pairing: the desktop seals the
+      // same event and APNs shows it, so raising one here too is a duplicate.
+      if (shouldDeliverLocally(hostId)) {
+        await showLocalNotification(event as NotificationEvent, hostId)
+      }
     } else {
       await dismissLocalNotification(event as DismissNotificationEvent, hostId)
     }

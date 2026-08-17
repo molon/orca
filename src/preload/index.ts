@@ -4899,6 +4899,13 @@ const api = {
       ipcRenderer.invoke('mobile:getWindowsFirewallStatus', args),
 
     repairWindowsFirewall: () => ipcRenderer.invoke('mobile:repairWindowsFirewall'),
+    getPushProvider: (): Promise<{ url: string; authToken: string }> =>
+      ipcRenderer.invoke('mobile:getPushProvider'),
+    setPushProvider: (args: {
+      url: string
+      authToken: string
+    }): Promise<{ ok: boolean; configured: boolean; error?: string }> =>
+      ipcRenderer.invoke('mobile:setPushProvider', args),
 
     openWindowsNetworkSettings: () => ipcRenderer.invoke('mobile:openWindowsNetworkSettings'),
 

@@ -4,6 +4,7 @@ import type { RpcClient } from '../transport/rpc-client'
 import { loadNotificationDeliveryMode } from '../storage/preferences'
 import { resolveNotificationDeliveryMode } from './notification-delivery-mode'
 import { registerPushDevice, unregisterPushDevice } from './push-device-registration'
+import { recordHostPushDelivery } from './push-delivery-state'
 
 /**
  * Brings this pairing's push registration in line with the delivery setting,
@@ -21,16 +22,22 @@ export async function registerPushDeviceForHost(client: RpcClient, hostId: strin
       // this phone. APNs would never report the token as gone — it is still
       // perfectly valid — so the desktop has to be told.
       await unregisterPushDevice({ client, hostId })
+      recordHostPushDelivery(hostId, { mode, pushRegistered: false })
       return
     }
-    await registerPushDevice({
+    const result = await registerPushDevice({
       client,
       hostId,
       readDeviceToken: readNativePushToken,
       label: Platform.OS === 'ios' ? 'iOS' : 'Android'
     })
+    // The live stream reads this to decide whether to raise its own
+    // notification. Both paths carry every event, so without it a connected,
+    // registered phone shows each one twice.
+    recordHostPushDelivery(hostId, { mode, pushRegistered: result.kind === 'registered' })
   } catch {
     // Push stays unregistered and the local path keeps delivering.
+    recordHostPushDelivery(hostId, { mode: 'auto', pushRegistered: false })
   }
 }
 

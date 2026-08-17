@@ -140,12 +140,12 @@ describe('Endpoint file lifecycle', () => {
     await server.start({
       env: 'development',
       userDataPath,
-      endpointNamespace: 'com.stablyai.orca.dev.test123'
+      endpointNamespace: 'com.molon.orca.dev.test123'
     })
     try {
       const env = server.buildPtyEnv()
       expect(env.ORCA_AGENT_HOOK_ENDPOINT).toBe(server.endpointFilePath)
-      expect(env.ORCA_AGENT_HOOK_ENDPOINT).toContain('com.stablyai.orca.dev.test123')
+      expect(env.ORCA_AGENT_HOOK_ENDPOINT).toContain('com.molon.orca.dev.test123')
       expect(env.ORCA_AGENT_HOOK_PORT).toBeTruthy()
       expect(env.ORCA_AGENT_HOOK_TOKEN).toBeTruthy()
     } finally {

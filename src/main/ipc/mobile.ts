@@ -4,6 +4,10 @@ import type { MobilePairingConnectionMode } from '../../shared/mobile-pairing-co
 import { classifyRemotePairingHostname } from '../../shared/remote-pairing-address'
 import type { RuntimePairingReach } from '../../shared/runtime-pairing-reach'
 import type { DeviceEntry } from '../runtime/device-registry'
+import {
+  loadMobilePushProviderConfig,
+  saveMobilePushProviderConfig
+} from '../runtime/mobile-push-provider-sender'
 import { NETWORK_EXPOSURE_FAILED_GUIDANCE } from '../runtime/network-exposure-guidance'
 import {
   getDefaultPairingAddress,
@@ -199,6 +203,32 @@ export function registerMobileHandlers(
         endpoint: offer.endpoint,
         deviceId: offer.deviceId
       }
+    }
+  )
+
+  // Why the token round-trips to the renderer at all: it is the field the user
+  // has to be able to see and correct. A write-only surface makes "is this the
+  // same token my provider is running with?" unanswerable.
+  ipcMain.handle('mobile:getPushProvider', () => {
+    return loadMobilePushProviderConfig(app.getPath('userData')) ?? { url: '', authToken: '' }
+  })
+
+  ipcMain.handle(
+    'mobile:setPushProvider',
+    (_event, args: { url?: unknown; authToken?: unknown }) => {
+      const url = typeof args?.url === 'string' ? args.url.trim() : ''
+      const authToken = typeof args?.authToken === 'string' ? args.authToken.trim() : ''
+      // Clearing either field turns push off rather than leaving a half
+      // configuration that fails on every notification.
+      if (!url || !authToken) {
+        saveMobilePushProviderConfig(app.getPath('userData'), null)
+        return { ok: true, configured: false }
+      }
+      if (!/^https?:\/\//.test(url)) {
+        return { ok: false, configured: false, error: 'url must start with http:// or https://' }
+      }
+      saveMobilePushProviderConfig(app.getPath('userData'), { url, authToken })
+      return { ok: true, configured: true }
     }
   )
 

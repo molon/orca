@@ -101,10 +101,46 @@ export const getMobileSidebarShortcutSearchEntry = createLocalizedCatalog(
   })
 )
 
+export const getMobilePushProviderSearchEntry = createLocalizedCatalog(
+  (): SettingsSearchEntry => ({
+    title: translate(
+      'auto.components.settings.mobile.settings.search.pushProviderTitle',
+      'Push Notification Provider'
+    ),
+    description: translate(
+      'auto.components.settings.mobile.settings.search.pushProviderDescription',
+      'Deliver notifications to your phone while it is asleep or disconnected.'
+    ),
+    keywords: [
+      ...translateSearchKeyword(
+        'auto.components.settings.mobile.settings.search.pushKeywordPush',
+        'push'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.mobile.settings.search.pushKeywordNotification',
+        'notification'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.mobile.settings.search.pushKeywordApns',
+        'apns'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.mobile.settings.search.pushKeywordProvider',
+        'provider'
+      ),
+      ...translateSearchKeyword(
+        'auto.components.settings.mobile.settings.search.pushKeywordRemote',
+        'remote'
+      )
+    ]
+  })
+)
+
 export const getMobileSettingsPaneSearchEntries = createLocalizedCatalog(
   (): SettingsSearchEntry[] => [
     getMobileOverviewSearchEntry(),
     getMobileSidebarShortcutSearchEntry(),
+    getMobilePushProviderSearchEntry(),
     ...getMobilePaneSearchEntries()
   ]
 )

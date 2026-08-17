@@ -3,15 +3,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  createMobilePushRelaySender,
-  loadMobilePushRelayConfig,
-  MOBILE_PUSH_RELAY_FILENAME
-} from './mobile-push-relay-sender'
+  createMobilePushProviderSender,
+  loadMobilePushProviderConfig,
+  MOBILE_PUSH_PROVIDER_FILENAME
+} from './mobile-push-provider-sender'
 
 let dir: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'orca-relay-'))
+  dir = mkdtempSync(join(tmpdir(), 'orca-provider-'))
 })
 
 afterEach(() => {
@@ -19,7 +19,7 @@ afterEach(() => {
 })
 
 function writeConfig(contents: string): void {
-  writeFileSync(join(dir, MOBILE_PUSH_RELAY_FILENAME), contents, 'utf8')
+  writeFileSync(join(dir, MOBILE_PUSH_PROVIDER_FILENAME), contents, 'utf8')
 }
 
 const REQUEST = {
@@ -29,24 +29,24 @@ const REQUEST = {
   collapseId: 'wt-42'
 }
 
-describe('mobile push relay config', () => {
-  // Why null and not a throw: no relay is the normal state, and refusing to
+describe('mobile push provider config', () => {
+  // Why null and not a throw: no provider is the normal state, and refusing to
   // start over a file the user never wrote would break the local path too.
-  it('reports no relay when nothing is configured', () => {
-    expect(loadMobilePushRelayConfig(dir)).toBeNull()
+  it('reports no provider when nothing is configured', () => {
+    expect(loadMobilePushProviderConfig(dir)).toBeNull()
   })
 
   it('reads a configured relay', () => {
-    writeConfig(JSON.stringify({ url: 'https://relay.example:8443', authToken: 'secret' }))
-    expect(loadMobilePushRelayConfig(dir)).toEqual({
-      url: 'https://relay.example:8443',
+    writeConfig(JSON.stringify({ url: 'https://provider.example:8443', authToken: 'secret' }))
+    expect(loadMobilePushProviderConfig(dir)).toEqual({
+      url: 'https://provider.example:8443',
       authToken: 'secret'
     })
   })
 
   it('drops a trailing slash so the path is not doubled', () => {
-    writeConfig(JSON.stringify({ url: 'https://relay.example/', authToken: 'secret' }))
-    expect(loadMobilePushRelayConfig(dir)?.url).toBe('https://relay.example')
+    writeConfig(JSON.stringify({ url: 'https://provider.example/', authToken: 'secret' }))
+    expect(loadMobilePushProviderConfig(dir)?.url).toBe('https://provider.example')
   })
 
   // Each of these would otherwise produce a sender that fails on every push,
@@ -54,25 +54,25 @@ describe('mobile push relay config', () => {
   it.each([
     ['not json', 'not json at all'],
     ['no url', JSON.stringify({ authToken: 'secret' })],
-    ['no token', JSON.stringify({ url: 'https://relay.example' })],
-    ['empty token', JSON.stringify({ url: 'https://relay.example', authToken: '' })],
-    ['non-http url', JSON.stringify({ url: 'ftp://relay.example', authToken: 'secret' })]
+    ['no token', JSON.stringify({ url: 'https://provider.example' })],
+    ['empty token', JSON.stringify({ url: 'https://provider.example', authToken: '' })],
+    ['non-http url', JSON.stringify({ url: 'ftp://provider.example', authToken: 'secret' })]
   ])('treats %s as unconfigured', (_name, contents) => {
     writeConfig(contents)
-    expect(loadMobilePushRelayConfig(dir)).toBeNull()
+    expect(loadMobilePushProviderConfig(dir)).toBeNull()
   })
 })
 
 describe('mobile push relay sender', () => {
-  const config = { url: 'https://relay.example', authToken: 'secret' }
+  const config = { url: 'https://provider.example', authToken: 'secret' }
 
-  it('posts the sealed envelope with the relay credential', async () => {
+  it('posts the sealed envelope with the provider credential', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 202 }))
-    const result = await createMobilePushRelaySender(config, fetchImpl as never)(REQUEST)
+    const result = await createMobilePushProviderSender(config, fetchImpl as never)(REQUEST)
 
     expect(result).toEqual({ kind: 'sent' })
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('https://relay.example/push')
+    expect(url).toBe('https://provider.example/push')
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer secret')
     expect(JSON.parse(init.body as string)).toEqual({
       deviceToken: 'token-1',
@@ -83,7 +83,7 @@ describe('mobile push relay sender', () => {
   })
 
   // Why only 410: it is APNs reporting the token permanently gone. Anything
-  // else may be a relay restart or a flaky link, and unregistering on those
+  // else may be a provider restart or a flaky link, and unregistering on those
   // would silence phones that are working.
   it('unregisters the device only on 410', async () => {
     for (const [status, kind] of [
@@ -93,7 +93,7 @@ describe('mobile push relay sender', () => {
       [500, 'failed']
     ] as const) {
       const fetchImpl = vi.fn(async () => new Response(null, { status }))
-      const result = await createMobilePushRelaySender(config, fetchImpl as never)(REQUEST)
+      const result = await createMobilePushProviderSender(config, fetchImpl as never)(REQUEST)
       expect(result.kind).toBe(kind)
     }
   })
@@ -102,7 +102,7 @@ describe('mobile push relay sender', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('ECONNREFUSED')
     })
-    const result = await createMobilePushRelaySender(config, fetchImpl as never)(REQUEST)
+    const result = await createMobilePushProviderSender(config, fetchImpl as never)(REQUEST)
     expect(result).toEqual({ kind: 'failed', reason: 'ECONNREFUSED' })
   })
 
@@ -110,13 +110,13 @@ describe('mobile push relay sender', () => {
   // failure must not carry it into a log line.
   it('keeps the envelope out of the failure reason', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 500 }))
-    const result = await createMobilePushRelaySender(config, fetchImpl as never)(REQUEST)
+    const result = await createMobilePushProviderSender(config, fetchImpl as never)(REQUEST)
     expect(JSON.stringify(result)).not.toContain('sealed')
   })
 
   it('omits collapseId when there is none', async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 202 }))
-    await createMobilePushRelaySender(
+    await createMobilePushProviderSender(
       config,
       fetchImpl as never
     )({ ...REQUEST, collapseId: undefined })
