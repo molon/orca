@@ -49,6 +49,14 @@ export type MobileApi = {
     { ok: true } | { ok: false; reason: 'cancelled' | 'failed' | 'unsupported' }
   >
   openWindowsNetworkSettings: () => Promise<boolean>
+  /** The push provider this desktop forwards sealed notifications through.
+   *  Empty strings mean push is off and notifications stay on the direct
+   *  connection. */
+  getPushProvider: () => Promise<{ url: string; authToken: string }>
+  setPushProvider: (args: {
+    url: string
+    authToken: string
+  }) => Promise<{ ok: boolean; configured: boolean; error?: string }>
   getRuntimePairingUrl: (args?: {
     address?: string
     rotate?: boolean

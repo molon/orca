@@ -950,6 +950,12 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       getWindowsFirewallStatus: () => Promise.resolve({ supported: false }),
       repairWindowsFirewall: () => Promise.resolve({ ok: false, reason: 'unsupported' }),
       openWindowsNetworkSettings: () => Promise.resolve(false),
+      // The provider config is a file on the desktop machine, which the web
+      // client has no access to. Reporting it as unset keeps the settings
+      // section honest rather than showing a value it cannot change.
+      getPushProvider: () => Promise.resolve({ url: '', authToken: '' }),
+      setPushProvider: () =>
+        Promise.resolve({ ok: false, configured: false, error: 'unsupported on web' }),
       getRuntimePairingUrl: () => Promise.resolve({ available: false }),
       listDevices: () => Promise.resolve({ devices: [] }),
       revokeDevice: () => Promise.resolve({ revoked: false }),
