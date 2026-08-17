@@ -6,7 +6,6 @@ import Constants from 'expo-constants'
 // no group either, so both sides agree there is nothing to share and push
 // falls back to placeholder text.
 const accessGroup = Constants.expoConfig?.extra?.orcaPushKeychainAccessGroup
-
 // Why AFTER_FIRST_UNLOCK rather than the WHEN_UNLOCKED level the pairing
 // credentials use: a push most often arrives while the phone is locked in a
 // pocket. The Notification Service Extension wakes to decrypt it, and a
@@ -28,7 +27,11 @@ const PUSH_KEY_OPTIONS: SecureStore.SecureStoreOptions = {
   ...(typeof accessGroup === 'string' ? { accessGroup } : {})
 }
 
-const PUSH_KEY_PREFIX = 'orca:push-key:'
+// Colons are not legal here: expo-secure-store accepts only alphanumerics,
+// '.', '-' and '_', and throws on anything else. The throw is what makes this
+// worth spelling out — it propagates out of the save, gets swallowed by the
+// connect path, and leaves the extension with no key and no clue why.
+const PUSH_KEY_PREFIX = 'orca.push-key.'
 
 /**
  * What the extension needs to turn one push into a routed notification.
@@ -49,7 +52,10 @@ export type StoredPushIdentity = {
  * it belongs to — so the desktop never has to know a phone-side identifier.
  */
 function storageKey(deviceId: string): string {
-  return `${PUSH_KEY_PREFIX}${encodeURIComponent(deviceId)}`
+  // Appended verbatim: deviceId is a UUID this app mints, so it is already
+  // within the legal set. Percent-encoding it would introduce '%', which is
+  // not.
+  return `${PUSH_KEY_PREFIX}${deviceId}`
 }
 
 export async function savePushIdentity(

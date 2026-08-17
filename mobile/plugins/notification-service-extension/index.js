@@ -216,6 +216,15 @@ function withExtensionTarget(config, appleTeamId) {
       settings.CURRENT_PROJECT_VERSION = cfg.ios?.buildNumber ?? '1'
       settings.CODE_SIGN_ENTITLEMENTS = `"${TARGET_NAME}/${TARGET_NAME}.entitlements"`
       settings.SWIFT_VERSION = '5.0'
+      // Opt-in only: ORCA_PUSH_DIAG=1 npx expo prebuild -p ios --clean. See the
+      // flag's comment in NotificationService.swift for why it must not ship.
+      //
+      // --clean is not optional: this whole block is skipped when the target
+      // already exists, so a settings change made without it silently keeps the
+      // previous build's value.
+      if (process.env.ORCA_PUSH_DIAG) {
+        settings.SWIFT_ACTIVE_COMPILATION_CONDITIONS = '"$(inherited) ORCA_PUSH_DIAG"'
+      }
       settings.CODE_SIGN_STYLE = 'Automatic'
       // The extension runs under a ~24 MB cap; it has no reason to carry
       // anything beyond CryptoKit and Foundation.

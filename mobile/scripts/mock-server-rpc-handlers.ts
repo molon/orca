@@ -140,14 +140,25 @@ export function handleRequest(
     // without a host that mints a key, and the whole point of the mock server
     // is to run the phone against something without a real desktop.
     case 'notifications.registerPushDevice': {
-      const params = request.params as { deviceId?: string } | undefined
+      const params = request.params as { deviceId?: string; deviceToken?: string } | undefined
       const deviceId = typeof params?.deviceId === 'string' ? params.deviceId : 'mock-device'
-      respond(success(request.id, { pushKeyB64: mockPushKeyFor(deviceId) }))
-      return true
+      const pushKeyB64 = mockPushKeyFor(deviceId)
+      // Printed because this is the only place the phone's real APNs token
+      // surfaces, and sending it a push through Apple is the one way to
+      // exercise the Notification Service Extension — simctl push never runs
+      // it. The key is deterministic, so printing it costs nothing a reader of
+      // this file does not already have.
+      console.log('[mock] registerPushDevice', {
+        deviceId,
+        deviceToken: params?.deviceToken,
+        pushKeyB64
+      })
+      respond(success(request.id, { pushKeyB64 }))
+      break
     }
     case 'notifications.unregisterPushDevice':
       respond(success(request.id, { unregistered: true }))
-      return true
+      break
     case 'status.get':
       respond(
         success(request.id, {

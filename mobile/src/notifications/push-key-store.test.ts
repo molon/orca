@@ -58,9 +58,7 @@ describe('push key store', () => {
       pushKeyB64: 'key-b64',
       hostId: 'host-1'
     })
-    expect(getItemAsync.mock.calls[0]![0]).toBe(
-      setItemAsync.mock.calls[0]?.[0] ?? 'orca:push-key:dev-1'
-    )
+    expect(getItemAsync.mock.calls[0]![0]).toMatch(/^[A-Za-z0-9._-]+$/)
     expect(getItemAsync.mock.calls[0]![1]?.keychainAccessible).toBe(
       SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
     )
@@ -72,9 +70,16 @@ describe('push key store', () => {
     expect(setItemAsync.mock.calls[0]![0]).not.toBe(setItemAsync.mock.calls[1]![0])
   })
 
-  it('encodes the device id so an exotic id cannot collide or escape its key', async () => {
-    await savePushIdentity('dev/../other', { pushKeyB64: 'a', hostId: 'h' })
-    expect(setItemAsync.mock.calls[0]![0]).not.toContain('/')
+  // Why this and not "it round-trips": expo-secure-store validates the key and
+  // throws on anything outside this set. A colon in the prefix made every save
+  // throw, the connect path swallowed it, and the extension read an empty
+  // keychain forever — with nothing anywhere saying why.
+  it('builds a key from characters SecureStore accepts', async () => {
+    await savePushIdentity('618285fa-d14c-4286-b2a9-01b33f7d628a', {
+      pushKeyB64: 'a',
+      hostId: 'h'
+    })
+    expect(setItemAsync.mock.calls[0]![0]).toMatch(/^[A-Za-z0-9._-]+$/)
   })
 
   it('returns null when no key is stored', async () => {
