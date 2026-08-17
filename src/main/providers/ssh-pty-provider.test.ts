@@ -1,5 +1,4 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { formatPtyExitedError } from '../../shared/ssh-pty-failure-tokens'
 import { SshPtyProvider } from './ssh-pty-provider'
 import { POWERLEVEL10K_WIZARD_DISABLE_ENV } from '../pty/powerlevel10k-wizard-env'
 import { PTY_STARTUP_INGRESS_VERSION } from '../../shared/pty-startup-ingress'
@@ -370,14 +369,16 @@ describe('SshPtyProvider', () => {
       })
     })
 
-    it('forwards explicit shellOverride and terminalWindowsWslDistro to the relay mux', async () => {
+    it('forwards shell, WSL, and scoped-history options to the relay mux', async () => {
       mux.request.mockResolvedValue({ id: 'pty-2' })
 
       await provider.spawn({
         cols: 120,
         rows: 40,
         shellOverride: 'powershell.exe',
-        terminalWindowsWslDistro: 'Ubuntu'
+        terminalWindowsWslDistro: 'Ubuntu',
+        worktreeId: 'repo-1::/remote/wt',
+        historyIsolationEnabled: true
       })
 
       expectRequest(mux.request, 'pty.spawn', {
@@ -386,7 +387,9 @@ describe('SshPtyProvider', () => {
         cwd: undefined,
         env: { [POWERLEVEL10K_WIZARD_DISABLE_ENV]: 'true' },
         shellOverride: 'powershell.exe',
-        terminalWindowsWslDistro: 'Ubuntu'
+        terminalWindowsWslDistro: 'Ubuntu',
+        worktreeId: 'repo-1::/remote/wt',
+        historyIsolationEnabled: true
       })
     })
 
@@ -585,8 +588,7 @@ describe('SshPtyProvider', () => {
           id: 'pty-old',
           cols: 80,
           rows: 24,
-          suppressReplayNotification: true,
-          exitProofSupported: true
+          suppressReplayNotification: true
         },
         sourceActivationRequestOptions
       )
@@ -632,8 +634,7 @@ describe('SshPtyProvider', () => {
         id: 'pty-old',
         cols: 80,
         rows: 24,
-        suppressReplayNotification: true,
-        exitProofSupported: true
+        suppressReplayNotification: true
       })
       expect(result).toEqual({
         id: 'ssh:conn-1@@pty-old',
@@ -642,8 +643,7 @@ describe('SshPtyProvider', () => {
       })
     })
 
-    // New relays prioritize incarnation; old relays ignore that field and retain this weaker fence.
-    it('preserves pane identity for relays that predate incarnation fencing', async () => {
+    it('reattaches with explicit pane identity when hook env was stripped', async () => {
       mux.request.mockResolvedValue({ replay: 'buffered-output' })
 
       await provider.spawn({
@@ -659,29 +659,17 @@ describe('SshPtyProvider', () => {
         cols: 80,
         rows: 24,
         suppressReplayNotification: true,
-        exitProofSupported: true,
         expectedPaneKey: 'tab-a:leaf-a',
         expectedTabId: 'tab-a'
       })
     })
 
-    it('does not fresh-spawn over a reattach whose shell the relay saw exit', async () => {
-      // INVERTED to drive the exit the relay OBSERVED. A bare not-found no longer becomes expiry —
-      // it proves nothing when the answering relay may be a replacement — so the observed exit is
-      // now what carries this through to expiry. The property under test is unchanged: a failed
-      // reattach throws instead of quietly spawning a second shell over the pane.
-      mux.request.mockRejectedValueOnce(
-        new Error(formatPtyExitedError('pty-old', 0, 'inc-host-old'))
-      )
+    it('does not fresh-spawn over an expired reattach session', async () => {
+      mux.request.mockRejectedValueOnce(new Error('PTY "pty-old" not found'))
 
-      await expect(
-        provider.spawn({
-          cols: 80,
-          rows: 24,
-          sessionId: 'pty-old',
-          expectedIncarnationId: 'inc-host-old'
-        })
-      ).rejects.toThrow('SSH_SESSION_EXPIRED: pty-old')
+      await expect(provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })).rejects.toThrow(
+        'SSH_SESSION_EXPIRED: pty-old'
+      )
 
       expect(mux.request).toHaveBeenNthCalledWith(
         1,
@@ -690,23 +678,9 @@ describe('SshPtyProvider', () => {
           id: 'pty-old',
           cols: 80,
           rows: 24,
-          suppressReplayNotification: true,
-          exitProofSupported: true,
-          expectedIncarnationId: 'inc-host-old'
+          suppressReplayNotification: true
         },
         sourceActivationRequestOptions
-      )
-      expect(mux.request).toHaveBeenCalledTimes(1)
-    })
-
-    // The sibling case, and the one the change is for: an id the relay simply does not know may be
-    // a shell still running under a relay this one replaced. It must still refuse to fresh-spawn,
-    // and must NOT be dressed up as expiry, which is what authorized the replacement.
-    it('does not fresh-spawn, nor claim expiry, when the relay merely has no such PTY', async () => {
-      mux.request.mockRejectedValueOnce(new Error('PTY "pty-old" not found'))
-
-      await expect(provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })).rejects.toThrow(
-        'PTY "pty-old" not found'
       )
       expect(mux.request).toHaveBeenCalledTimes(1)
     })
@@ -744,8 +718,7 @@ describe('SshPtyProvider', () => {
       'pty.attach',
       {
         id: 'pty-1',
-        suppressReplayNotification: true,
-        exitProofSupported: true
+        suppressReplayNotification: true
       },
       expect.objectContaining({
         timeoutMs: 10_000,
@@ -767,6 +740,28 @@ describe('SshPtyProvider', () => {
 
     await expect(provider.attachForReconnect(scopedPty1)).rejects.toThrow(
       'Invalid SSH PTY attach incarnation'
+    )
+  })
+
+  it('attachForReconnect forwards expected identity when provided', async () => {
+    await provider.attachForReconnect(scopedPty1, {
+      paneKey: 'tab-a:leaf-a',
+      tabId: 'tab-a'
+    })
+
+    expectRequest(
+      mux.request,
+      'pty.attach',
+      {
+        id: 'pty-1',
+        suppressReplayNotification: true,
+        expectedPaneKey: 'tab-a:leaf-a',
+        expectedTabId: 'tab-a'
+      },
+      expect.objectContaining({
+        timeoutMs: 10_000,
+        beforeResolve: expect.any(Function)
+      })
     )
   })
 
