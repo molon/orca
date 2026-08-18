@@ -27,6 +27,50 @@ function registration(deviceId: string, keyB64: string): MobilePushRegistration 
 // Why this matters: without the reason, a push that never left the machine is
 // indistinguishable from one that was never configured — the symptom the
 // operator sees is identical and the log says nothing either way.
+// APNs rejects the entire push with InvalidCollapseId above 64 bytes, and
+// every agent notification id is longer than that.
+describe('collapse id fits what APNs accepts', () => {
+  const longId = ['agent', 'w'.repeat(120), 'p'.repeat(120), '1786993372466'].join(':')
+
+  async function collapseIdSentFor(notificationId: string): Promise<string | undefined> {
+    let seen: string | undefined
+    await fanOutMobilePush(
+      [
+        {
+          deviceId: 'dev-1',
+          deviceToken: 'tok',
+          pushKeyB64: Buffer.alloc(32).toString('base64'),
+          registeredAtMs: 1
+        }
+      ],
+      { source: 'claude', title: 't', body: 'b', notificationId },
+      async (request) => {
+        seen = request.collapseId
+        return { kind: 'sent' }
+      }
+    )
+    return seen
+  }
+
+  it('stays inside the 64-byte limit', async () => {
+    const collapseId = await collapseIdSentFor(longId)
+    expect(collapseId).toBeDefined()
+    expect(Buffer.byteLength(collapseId as string)).toBeLessThanOrEqual(64)
+  })
+
+  // Why hashed rather than truncated: two turns in the same pane differ only in
+  // the trailing timestamp, so a prefix would collapse different events.
+  it('keeps two turns in one pane distinct', async () => {
+    const a = await collapseIdSentFor(`${longId}1`)
+    const b = await collapseIdSentFor(`${longId}2`)
+    expect(a).not.toBe(b)
+  })
+
+  it('collapses a replay of the same notification', async () => {
+    expect(await collapseIdSentFor(longId)).toBe(await collapseIdSentFor(longId))
+  })
+})
+
 describe('fanout failure reasons', () => {
   it('carries the reason a send failed', async () => {
     const outcome = await fanOutMobilePush(
@@ -87,7 +131,7 @@ describe('mobile push fan-out', () => {
     expect(() => openMobilePushEnvelope(toA.envelope, keyB)).toThrow()
   })
 
-  it('carries the notification id as the collapse id so a push and a replay collapse', async () => {
+  it('derives the collapse id from the notification id so a push and a replay collapse', async () => {
     const sent: MobilePushSendRequest[] = []
     await fanOutMobilePush(
       [registration('a', mobilePushKeyToBase64(generateMobilePushKey()))],
@@ -97,7 +141,10 @@ describe('mobile push fan-out', () => {
         return { kind: 'sent' }
       }
     )
-    expect(sent[0]!.collapseId).toBe('n-1')
+    // Not the id verbatim: APNs caps it at 64 bytes and rejects the push above
+    // that. Same id in, same collapse id out, is what the collapse depends on.
+    expect(sent[0]!.collapseId).toBeDefined()
+    expect(Buffer.byteLength(sent[0]!.collapseId as string)).toBeLessThanOrEqual(64)
   })
 
   it('omits the collapse id when the event has no notification id', async () => {

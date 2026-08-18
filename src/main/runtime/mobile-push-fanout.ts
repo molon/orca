@@ -1,6 +1,7 @@
 // Why: a dispatch seals the notification once per device, because each device
 // holds its own key. One device failing must not cost the others their push,
 // and only a permanent APNs rejection may cost a device its registration.
+import { createHash } from 'node:crypto'
 import { sealMobilePushEnvelope, type MobilePushPayload } from './mobile-push-envelope'
 import { mobilePushKeyFromBase64 } from './mobile-push-envelope'
 import type { MobilePushRegistration } from './mobile-push-registry'
@@ -39,6 +40,19 @@ export type MobilePushFanoutOutcome = {
  * sender must not stop the remaining devices from being notified. A rejected
  * promise here would mean one broken phone silences the user's other phones.
  */
+/**
+ * APNs caps apns-collapse-id at 64 bytes and rejects the whole push with
+ * InvalidCollapseId when it is longer — which every agent notification id is,
+ * since it embeds a percent-encoded worktree id and pane key.
+ *
+ * Hashed rather than truncated: two turns in the same pane differ only in the
+ * trailing timestamp, so a prefix would collapse notifications that are not
+ * the same event — the failure mode collapse ids exist to avoid.
+ */
+function collapseIdFor(notificationId: string): string {
+  return createHash('sha256').update(notificationId).digest('base64url').slice(0, 32)
+}
+
 export async function fanOutMobilePush(
   registrations: readonly MobilePushRegistration[],
   payload: MobilePushPayload,
@@ -55,7 +69,7 @@ export async function fanOutMobilePush(
           // Why notificationId: it is the same identity the local path dedups
           // on, so a push and a catch-up replay of one event collapse instead
           // of stacking two banners.
-          ...(payload.notificationId ? { collapseId: payload.notificationId } : {})
+          ...(payload.notificationId ? { collapseId: collapseIdFor(payload.notificationId) } : {})
         })
         return { deviceId: registration.deviceId, result }
       } catch (error) {
