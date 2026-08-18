@@ -24,6 +24,44 @@ function registration(deviceId: string, keyB64: string): MobilePushRegistration 
   }
 }
 
+// Why this matters: without the reason, a push that never left the machine is
+// indistinguishable from one that was never configured — the symptom the
+// operator sees is identical and the log says nothing either way.
+describe('fanout failure reasons', () => {
+  it('carries the reason a send failed', async () => {
+    const outcome = await fanOutMobilePush(
+      [
+        {
+          deviceId: 'dev-1',
+          deviceToken: 'tok',
+          pushKeyB64: Buffer.alloc(32).toString('base64'),
+          registeredAtMs: 1
+        }
+      ],
+      { source: 'claude', title: 't', body: 'b' },
+      async () => ({ kind: 'failed', reason: 'provider unreachable' })
+    )
+    expect(outcome.failedDeviceIds).toEqual(['dev-1'])
+    expect(outcome.failureReasons).toEqual(['provider unreachable'])
+  })
+
+  it('reports no reasons when everything sent', async () => {
+    const outcome = await fanOutMobilePush(
+      [
+        {
+          deviceId: 'dev-1',
+          deviceToken: 'tok',
+          pushKeyB64: Buffer.alloc(32).toString('base64'),
+          registeredAtMs: 1
+        }
+      ],
+      { source: 'claude', title: 't', body: 'b' },
+      async () => ({ kind: 'sent' })
+    )
+    expect(outcome.failureReasons).toEqual([])
+  })
+})
+
 describe('mobile push fan-out', () => {
   it('seals separately for each device, so each opens only with its own key', async () => {
     const keyA = generateMobilePushKey()

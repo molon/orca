@@ -14127,6 +14127,19 @@ export class OrcaRuntimeService {
   }
 
   /**
+   * Drops the resolved sender so the next notification re-reads the config.
+   *
+   * Why this must exist: the sender is resolved once and cached, so a provider
+   * saved in Settings would not take effect until the app restarted — and a
+   * provider saved before the first notification would latch as "none" and
+   * never be retried. Both look exactly like push being broken.
+   */
+  invalidateMobilePushSender(): void {
+    this.mobilePushSender = null
+    this.mobilePushSenderResolved = false
+  }
+
+  /**
    * Installs the provider sender when the operator has configured one.
    *
    * Why the runtime reads its own config rather than being handed a sender:
@@ -14196,6 +14209,14 @@ export class OrcaRuntimeService {
         },
         sender
       )
+      if (outcome.failureReasons.length > 0) {
+        // Why logged and not swallowed: a push that never leaves the machine is
+        // otherwise indistinguishable from one that was never configured.
+        console.warn('[mobile-push] send failed', {
+          devices: outcome.failedDeviceIds.length,
+          reasons: [...new Set(outcome.failureReasons)]
+        })
+      }
       if (outcome.unregisteredDeviceIds.size > 0) {
         this.setMobilePushRegistry(
           pruneMobilePushRegistrations(this.getMobilePushRegistry(), outcome.unregisteredDeviceIds)

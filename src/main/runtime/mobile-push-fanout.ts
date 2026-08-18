@@ -24,6 +24,10 @@ export type MobilePushSender = (request: MobilePushSendRequest) => Promise<Mobil
 export type MobilePushFanoutOutcome = {
   readonly sentDeviceIds: readonly string[]
   readonly failedDeviceIds: readonly string[]
+  /** Why kept: without it a push that never leaves the machine looks identical
+   *  to one that was never configured. The reason names the hop that failed —
+   *  an unreachable provider, a rejected credential — and never the envelope. */
+  readonly failureReasons: readonly string[]
   /** Feed straight into pruneMobilePushRegistrations. */
   readonly unregisteredDeviceIds: ReadonlySet<string>
 }
@@ -67,6 +71,7 @@ export async function fanOutMobilePush(
 
   const sentDeviceIds: string[] = []
   const failedDeviceIds: string[] = []
+  const failureReasons: string[] = []
   const unregisteredDeviceIds = new Set<string>()
   for (const { deviceId, result } of results) {
     if (result.kind === 'sent') {
@@ -75,7 +80,8 @@ export async function fanOutMobilePush(
       unregisteredDeviceIds.add(deviceId)
     } else {
       failedDeviceIds.push(deviceId)
+      failureReasons.push(result.reason)
     }
   }
-  return { sentDeviceIds, failedDeviceIds, unregisteredDeviceIds }
+  return { sentDeviceIds, failedDeviceIds, failureReasons, unregisteredDeviceIds }
 }

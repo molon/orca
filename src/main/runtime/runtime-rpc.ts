@@ -482,6 +482,12 @@ function injectDeviceScope(response: string, scope: DeviceScope): string {
 
 export class OrcaRuntimeRpcServer {
   private readonly runtime: OrcaRuntimeService
+
+  /** Lets IPC handlers reach runtime state that has no RPC of its own — the
+   *  push provider config is edited in Settings, not over the wire. */
+  getRuntimeService(): OrcaRuntimeService {
+    return this.runtime
+  }
   private readonly dispatcher: RpcDispatcher
   private readonly userDataPath: string
   private readonly pid: number

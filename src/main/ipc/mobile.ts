@@ -222,12 +222,16 @@ export function registerMobileHandlers(
       // configuration that fails on every notification.
       if (!url || !authToken) {
         saveMobilePushProviderConfig(app.getPath('userData'), null)
+        rpcServer.getRuntimeService().invalidateMobilePushSender()
         return { ok: true, configured: false }
       }
       if (!/^https?:\/\//.test(url)) {
         return { ok: false, configured: false, error: 'url must start with http:// or https://' }
       }
       saveMobilePushProviderConfig(app.getPath('userData'), { url, authToken })
+      // Without this the runtime keeps the sender it resolved at first use, so
+      // a corrected address would not take effect until the app restarted.
+      rpcServer.getRuntimeService().invalidateMobilePushSender()
       return { ok: true, configured: true }
     }
   )
