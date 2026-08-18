@@ -49,7 +49,13 @@ export const MobilePushPayloadSchema = z.object({
   title: z.string().max(512),
   body: z.string().max(1024),
   worktreeId: z.string().min(1).max(256).optional(),
-  notificationId: z.string().min(1).max(128).optional()
+  // Why 512 and not 128: an agent notification id embeds the worktree id and
+  // the pane key, both percent-encoded, plus a timestamp — 235 characters for
+  // a short worktree path, and deeper checkouts run longer. At 128 every agent
+  // completion failed schema validation while terminal bells, which carry no
+  // id, went through: push looked like it worked and silently dropped exactly
+  // the notifications it exists for.
+  notificationId: z.string().min(1).max(512).optional()
 })
 
 export type MobilePushPayload = z.infer<typeof MobilePushPayloadSchema>

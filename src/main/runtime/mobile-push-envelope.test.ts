@@ -17,6 +17,28 @@ const payload: MobilePushPayload = {
   notificationId: 'n-1'
 }
 
+// Why this exact shape: the id embeds the worktree id and pane key, both
+// percent-encoded. The 128-character bound rejected every real one, so agent
+// completions never pushed while terminal bells — which carry no id — did.
+describe('payload bounds match real notification ids', () => {
+  it('accepts an agent notification id built from a real worktree', () => {
+    const worktreeId = `${'a'.repeat(36)}::/Users/someone/orca/workspaces/project/some-worktree`
+    const notificationId = [
+      'agent',
+      encodeURIComponent(worktreeId),
+      encodeURIComponent(`${worktreeId}@@1da038e1`),
+      '1786993372466'
+    ].join(':')
+    expect(notificationId.length).toBeGreaterThan(128)
+    expect(() =>
+      sealMobilePushEnvelope(
+        { source: 'claude', title: 't', body: 'b', worktreeId, notificationId },
+        Buffer.alloc(32, 1)
+      )
+    ).not.toThrow()
+  })
+})
+
 describe('mobile push envelope', () => {
   it('round-trips a payload through seal and open', () => {
     const key = generateMobilePushKey()
