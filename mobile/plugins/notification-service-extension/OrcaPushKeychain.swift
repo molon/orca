@@ -25,6 +25,10 @@ enum OrcaPushKeychain {
     private static let services = ["orca.push.v1:no-auth", "orca.push.v1"]
     /// Must match the storageKey() prefix in push-key-store.ts.
     private static let accountPrefix = "orca.push-key."
+    /// Must match the storageKey() prefix in push-channel-store.ts. A channel
+    /// is the same secret reached a different way: pasted in by hand rather
+    /// than handed over by a paired desktop.
+    private static let channelPrefix = "orca.push-channel."
 
     /// What the extension needs to render and route one push.
     struct Identity: Decodable {
@@ -34,8 +38,17 @@ enum OrcaPushKeychain {
         let hostId: String
     }
 
+    /// A channel's key, stored under its own prefix but decoding to the same
+    /// shape — the extension does not care which side put it there.
+    static func loadChannelIdentity(channelId: String) -> Identity? {
+        return loadIdentity(account: channelPrefix + channelId)
+    }
+
     static func loadIdentity(deviceId: String) -> Identity? {
-        let account = accountPrefix + deviceId
+        return loadIdentity(account: accountPrefix + deviceId)
+    }
+
+    private static func loadIdentity(account: String) -> Identity? {
         for service in Self.services {
             if let identity = loadIdentity(account: account, service: service) {
                 return identity

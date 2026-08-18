@@ -19,6 +19,10 @@ enum OrcaPushEnvelope {
         let title: String
         let body: String
         let worktreeId: String?
+        /// A publisher that is not the desktop cannot know a worktree id — it
+        /// knows the directory the agent ran in. The app resolves the path
+        /// against the worktrees it already lists, at tap time.
+        let worktreePath: String?
         let notificationId: String?
     }
 

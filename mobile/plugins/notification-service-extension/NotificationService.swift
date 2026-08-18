@@ -47,10 +47,14 @@ class NotificationService: UNNotificationServiceExtension {
             return
         }
 
+        // Two publishers reach the same extension: a paired desktop names the
+        // pairing it minted, a hook names the channel it was configured with.
+        // The key they lead to is identical in shape, so only the lookup differs.
+        let channelId = content.userInfo[Self.channelIdKey] as? String
         guard
             let envelope = content.userInfo[Self.envelopeKey] as? String,
-            let deviceId = content.userInfo[Self.deviceIdKey] as? String,
-            !deviceId.isEmpty
+            let addressee = (content.userInfo[Self.deviceIdKey] as? String) ?? channelId,
+            !addressee.isEmpty
         else {
             // Not one of ours (or an older desktop that still sends plain
             // notifications) — pass it through untouched.
@@ -59,7 +63,9 @@ class NotificationService: UNNotificationServiceExtension {
             return
         }
 
-        guard let identity = OrcaPushKeychain.loadIdentity(deviceId: deviceId) else {
+        let identityOrNil = channelId.map { OrcaPushKeychain.loadChannelIdentity(channelId: $0) }
+            ?? OrcaPushKeychain.loadIdentity(deviceId: addressee)
+        guard let identity = identityOrNil else {
             // The usual cause is a phone that has never registered for push
             // with this host. Placeholder is the honest outcome.
             orcaPushDiag("nokey")
@@ -97,12 +103,16 @@ class NotificationService: UNNotificationServiceExtension {
         if let worktreeId = payload.worktreeId {
             routing["worktreeId"] = worktreeId
         }
+        if let worktreePath = payload.worktreePath {
+            routing["worktreePath"] = worktreePath
+        }
         if let notificationId = payload.notificationId {
             routing["notificationId"] = notificationId
         }
         userInfo["body"] = routing
         userInfo.removeValue(forKey: Self.envelopeKey)
         userInfo.removeValue(forKey: Self.deviceIdKey)
+        userInfo.removeValue(forKey: Self.channelIdKey)
         content.userInfo = userInfo
 
         contentHandler(content)
@@ -120,5 +130,8 @@ class NotificationService: UNNotificationServiceExtension {
     /// Travels outside the envelope because the extension needs it before it
     /// can decrypt anything. It names one pairing, not content.
     private static let deviceIdKey = "orcaDeviceId"
+    /// Names a channel rather than a pairing: what a hook has instead of a
+    /// desktop's registry.
+    private static let channelIdKey = "orcaChannelId"
 
 }

@@ -16,6 +16,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { colors, radii, spacing, typography } from '../../../src/theme/mobile-theme'
 import { loadHosts, updateHostNameAndEndpoint } from '../../../src/transport/host-store'
 import { displayHostEndpoint } from '../../../src/transport/host-endpoint'
+import { PushChannelSection } from '../../../src/components/PushChannelSection'
 import { resolveHostEndpointEdit } from '../../../src/transport/host-endpoint-edit'
 import { useForceReconnect, usePrimeHosts } from '../../../src/transport/client-context'
 import type { HostProfile } from '../../../src/transport/types'
@@ -249,6 +250,8 @@ export default function EditHostScreen() {
             ) : null}
 
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
+
+            {hostId ? <PushChannelSection hostId={hostId} /> : null}
           </ScrollView>
         </KeyboardAvoidingView>
       )}

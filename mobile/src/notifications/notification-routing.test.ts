@@ -88,3 +88,45 @@ describe('notification routing', () => {
     expect(notificationCredentialRecoveryRoute(target!)).toBeNull()
   })
 })
+
+// A hook knows the directory the agent ran in, never the worktree id the app
+// assigned. Without this the tap opens the host and stops there.
+describe('routing a notification that names a path', () => {
+  const worktreeIdByPath = new Map([['/Users/me/work/feature', 'repo-1::/Users/me/work/feature']])
+
+  it('resolves the path against the app’s own worktree list', () => {
+    const target = getNotificationNavigationTarget(
+      { hostId: 'host-1', worktreePath: '/Users/me/work/feature' },
+      { worktreeIdByPath }
+    )
+    expect(target?.sessionTarget).not.toBeNull()
+  })
+
+  it('ignores a trailing separator', () => {
+    const target = getNotificationNavigationTarget(
+      { hostId: 'host-1', worktreePath: '/Users/me/work/feature/' },
+      { worktreeIdByPath }
+    )
+    expect(target?.sessionTarget).not.toBeNull()
+  })
+
+  // Still opens the host: the notification was real even if the worktree has
+  // since been removed.
+  it('falls back to the host when the path is unknown', () => {
+    const target = getNotificationNavigationTarget(
+      { hostId: 'host-1', worktreePath: '/somewhere/else' },
+      { worktreeIdByPath }
+    )
+    expect(target?.hostId).toBe('host-1')
+    expect(target?.sessionTarget).toBeNull()
+  })
+
+  // An explicit id is what the paired desktop sends, and it must keep winning.
+  it('prefers an explicit worktree id', () => {
+    const target = getNotificationNavigationTarget(
+      { hostId: 'host-1', worktreeId: 'repo-9::/other', worktreePath: '/Users/me/work/feature' },
+      { worktreeIdByPath }
+    )
+    expect(JSON.stringify(target)).toContain('repo-9')
+  })
+})
