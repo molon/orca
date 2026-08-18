@@ -14191,10 +14191,17 @@ export class OrcaRuntimeService {
     this.ensureMobilePushSender()
     const sender = this.mobilePushSender
     if (!sender || event.type !== 'notification') {
+      // Why logged: "no provider configured" and "the send failed" are the same
+      // silence from the outside, and this one is the answer to "I set it up and
+      // nothing happens".
+      if (!sender && event.type === 'notification') {
+        console.log('[mobile-push] skipped: no provider configured')
+      }
       return
     }
     const registrations = listMobilePushRegistrations(this.getMobilePushRegistry())
     if (registrations.length === 0) {
+      console.log('[mobile-push] skipped: no device registered')
       return
     }
     try {
