@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useLocalSearchParams, usePathname, useRouter, useSegments } from 'expo-router'
+import { useGlobalSearchParams, usePathname, useRouter, useSegments } from 'expo-router'
 import { hostStackHostRoute } from '../navigation/host-stack-navigation'
 import { useOpenHostStackRoute } from '../navigation/use-open-host-stack-route'
 import {
@@ -12,7 +12,11 @@ export function useOpenNotificationRoute(): (target: NotificationNavigationTarge
   const openHostStackRoute = useOpenHostStackRoute()
   const router = useRouter()
   const segments = useSegments()
-  const params = useLocalSearchParams()
+  // Global, not local: this hook is used from the root layout, where the local
+  // params belong to the root route and never carry the open session's ids. The
+  // comparison then never matches and every tap navigates as if the check were
+  // not there — which is exactly how it failed the first time.
+  const params = useGlobalSearchParams()
   const pathname = usePathname()
 
   return useCallback(
