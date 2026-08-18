@@ -31,7 +31,9 @@ import { loadChannelIdForHost, saveChannelIdForHost } from '../notifications/pus
 export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.Element {
   const [blob, setBlob] = useState('')
   const [channelId, setChannelId] = useState<string | null>(null)
-  const [status, setStatus] = useState<string | null>(null)
+  // Why a kind and not just text: "saved" and "could not reach the server" read
+  // the same in grey, and the user is left guessing which one happened.
+  const [status, setStatus] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
     try {
       const channel = await parsePushChannelBlob(blob)
       if (!channel) {
-        setStatus('That is not a pairing string. Copy it again from setup.')
+        setStatus({ kind: 'warn', text: 'That is not a pairing string. Copy it again from setup.' })
         return
       }
       await savePushChannel(channel, hostId)
@@ -56,10 +58,13 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
       // reach the server now will subscribe on its next launch.
       setStatus(
         result.kind === 'subscribed'
-          ? 'Connected. Notifications from that machine will arrive here.'
+          ? { kind: 'ok', text: 'Connected — notifications from that machine will arrive here.' }
           : result.kind === 'unsupported'
-            ? 'Saved. This build cannot receive push, so nothing will arrive.'
-            : `Saved, but the server did not answer (${result.reason}). It will retry on next launch.`
+            ? { kind: 'warn', text: 'Saved, but this build cannot receive push.' }
+            : {
+                kind: 'warn',
+                text: `Saved, but the server did not answer (${result.reason}). It will retry on next launch.`
+              }
       )
     } finally {
       setBusy(false)
@@ -86,7 +91,7 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
       await deletePushChannel(channelId)
       await saveChannelIdForHost(hostId, null)
       setChannelId(null)
-      setStatus('Removed.')
+      setStatus({ kind: 'ok', text: 'Removed.' })
     } finally {
       setBusy(false)
     }
@@ -97,7 +102,10 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
       <Text style={styles.label}>Remote notifications</Text>
       {channelId ? (
         <View>
-          <Text style={styles.hint}>Connected to channel {channelId.slice(0, 8)}…</Text>
+          <View style={styles.connectedRow}>
+            <View style={styles.connectedDot} />
+            <Text style={styles.connectedText}>Connected · channel {channelId.slice(0, 8)}</Text>
+          </View>
           <TouchableOpacity
             style={styles.removeButton}
             onPress={() => void remove()}
@@ -135,7 +143,9 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
         Notifications are encrypted on that machine, so the server they travel through cannot read
         them.
       </Text>
-      {status ? <Text style={styles.status}>{status}</Text> : null}
+      {status ? (
+        <Text style={status.kind === 'ok' ? styles.statusOk : styles.status}>{status.text}</Text>
+      ) : null}
     </View>
   )
 }
@@ -163,5 +173,14 @@ const styles = StyleSheet.create({
   removeButton: { marginTop: 8, paddingVertical: 8 },
   removeText: { color: colors.textSecondary, fontSize: 14 },
   hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },
-  status: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 }
+  status: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
+  statusOk: { color: colors.statusGreen, fontSize: 12, lineHeight: 17 },
+  connectedRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  connectedDot: {
+    backgroundColor: colors.statusGreen,
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  connectedText: { color: colors.textPrimary, fontSize: 13 }
 })
