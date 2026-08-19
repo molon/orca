@@ -877,6 +877,7 @@ export default function SessionScreen() {
   )
   // Why: Expo SDK 55 edge-to-edge doesn't resize the window on IME open, so track keyboard height ourselves and lift the input without resizing the desktop PTY.
   const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const keyboardHeightRef = useRef(0)
   // Why: server-authoritative display mode per terminal, populated from subscribe responses.
   const [terminalModes, setTerminalModes] = useState<Map<string, MobileDisplayMode>>(new Map())
   const [terminalKeyboardMetrics, setTerminalKeyboardMetrics] = useState<
@@ -2515,19 +2516,48 @@ export default function SessionScreen() {
   useEffect(() => {
     const onShow = (e: KeyboardEvent) => {
       notifyKeyboardVisibility(true)
-      setKeyboardHeight(e.endCoordinates?.height ?? 0)
+      const height = e.endCoordinates?.height ?? 0
+      keyboardHeightRef.current = height
+      setKeyboardHeight(height)
     }
     const onHide = () => {
       notifyKeyboardVisibility(false)
+      keyboardHeightRef.current = 0
       setKeyboardHeight(0)
     }
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
     const showSub = Keyboard.addListener(showEvent, onShow)
     const hideSub = Keyboard.addListener(hideEvent, onHide)
+    const closeKeyboard = (): void => {
+      liveInputRef.current?.blur()
+      commandInputRef.current?.blur()
+      Keyboard.dismiss()
+    }
+    // iOS puts the keyboard back on resume without a matching show event, so the
+    // layout returns un-inset and snaps into place only on the next tap. Closing
+    // it on the way out leaves nothing to restore and nothing to snap.
+    const appStateSub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'background') {
+        closeKeyboard()
+        return
+      }
+      // Focus still held while the inset reads zero is that broken state itself:
+      // a keyboard on screen the layout knows nothing about. iOS may suspend the
+      // JS thread before the dismissal above runs, so settle it here too.
+      if (
+        next === 'active' &&
+        keyboardHeightRef.current <= 0 &&
+        (liveInputRef.current?.isFocused() === true ||
+          commandInputRef.current?.isFocused() === true)
+      ) {
+        closeKeyboard()
+      }
+    })
     return () => {
       showSub.remove()
       hideSub.remove()
+      appStateSub.remove()
     }
   }, [notifyKeyboardVisibility])
 
@@ -4943,7 +4973,10 @@ export default function SessionScreen() {
                     <TextInput
                       ref={liveInputRef}
                       style={styles.liveInputCapture}
-                      value={liveInputCapture}
+                      // Deliberately uncontrolled: a `value` makes React write the field, and
+                      // iOS ends the dictation session on a write that lands — while silently
+                      // skipping one that arrives with native events in flight, which strands
+                      // JS with a field it thinks it emptied.
                       // Why onChange, not onChangeText: only the raw native event carries the
                       // marked-text report that says whether this text is still preedit.
                       onChange={handleLiveInputChange}

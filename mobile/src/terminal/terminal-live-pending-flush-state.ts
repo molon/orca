@@ -1,14 +1,48 @@
 type TerminalLiveMirrorSender = (handle: string, payload: string) => Promise<boolean>
 
+/** An edit to the terminal's input line: drop this many trailing code points, then type this. */
+export type TerminalLiveMirrorEdit = {
+  readonly eraseCount: number
+  readonly appendText: string
+}
+
 type TerminalLivePendingRequest = {
   readonly resolve: (sent: boolean) => void
 }
 
 type TerminalLivePendingBatch = {
   readonly handle: string
-  payload: string
+  edit: TerminalLiveMirrorEdit
   readonly requests: TerminalLivePendingRequest[]
   readonly sender: TerminalLiveMirrorSender
+}
+
+const TERMINAL_DEL_BYTE = '\x7f'
+
+/**
+ * The single edit equivalent to `first` then `second`.
+ *
+ * Why compose rather than concatenate the bytes: dictation revises its own
+ * transcript several times a second, and every revision that lands while a send
+ * is in flight would otherwise be replayed on the terminal — each intermediate
+ * guess drawn and erased. Composing them means only states the text actually
+ * reached are ever drawn.
+ */
+export function composeTerminalLiveMirrorEdits(
+  first: TerminalLiveMirrorEdit,
+  second: TerminalLiveMirrorEdit
+): TerminalLiveMirrorEdit {
+  const appended = Array.from(first.appendText)
+  // The second edit erases what the first typed before it can reach the line.
+  const fromAppended = Math.min(second.eraseCount, appended.length)
+  return {
+    eraseCount: first.eraseCount + (second.eraseCount - fromAppended),
+    appendText: appended.slice(0, appended.length - fromAppended).join('') + second.appendText
+  }
+}
+
+export function buildTerminalLiveMirrorEditPayload(edit: TerminalLiveMirrorEdit): string {
+  return TERMINAL_DEL_BYTE.repeat(edit.eraseCount) + edit.appendText
 }
 
 export type TerminalLivePendingFlushState = {
@@ -58,7 +92,9 @@ async function drainTerminalLiveMirrorSends(
     }
 
     state.activeRequests = batch.requests
-    const sent = await batch.sender(batch.handle, batch.payload).catch(() => false)
+    const sent = await batch
+      .sender(batch.handle, buildTerminalLiveMirrorEditPayload(batch.edit))
+      .catch(() => false)
     if (state.generation !== generation) {
       return false
     }
@@ -70,11 +106,12 @@ async function drainTerminalLiveMirrorSends(
   return false
 }
 
-// Mirror deltas are ordered PTY bytes; batching pending bytes avoids one RTT per keystroke.
+// Mirror deltas are ordered PTY edits; composing pending ones avoids an RTT per
+// keystroke and keeps intermediate text off the terminal entirely.
 export function queueTerminalLiveMirrorSend(
   state: TerminalLivePendingFlushState,
   handle: string,
-  payload: string,
+  edit: TerminalLiveMirrorEdit,
   sender: TerminalLiveMirrorSender
 ): Promise<boolean> {
   let resolveRequest: (sent: boolean) => void = () => {}
@@ -83,12 +120,12 @@ export function queueTerminalLiveMirrorSend(
   })
   const pendingTail = state.pendingBatches.at(-1)
   if (pendingTail?.handle === handle && pendingTail.sender === sender) {
-    pendingTail.payload += payload
+    pendingTail.edit = composeTerminalLiveMirrorEdits(pendingTail.edit, edit)
     pendingTail.requests.push({ resolve: resolveRequest })
   } else {
     state.pendingBatches.push({
       handle,
-      payload,
+      edit,
       requests: [{ resolve: resolveRequest }],
       sender
     })

@@ -40,6 +40,8 @@ describe('terminal live input affordance', () => {
     expect(block).toContain('!canSend && styles.liveInputFocusTargetDisabled')
     expect(block).toContain('showSoftInputOnFocus')
     expect(block).toContain('liveInputText={liveInputCapture}')
+    // Uncontrolled on purpose: a `value` lets React write the field mid dictation.
+    expect(block).not.toContain('value={liveInputCapture}')
     expect(sessionRouteSource).toContain('useTerminalLiveInputFocus({')
     expect(sessionRouteSource).toContain('return resetLiveInputFocus')
     expect(liveInputFocusSource).toContain('focusTerminalLiveInputTarget(inputRef.current')
