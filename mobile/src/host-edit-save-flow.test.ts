@@ -37,6 +37,13 @@ vi.mock('lucide-react-native', () => ({
   ChevronLeft: 'ChevronLeft'
 }))
 
+// Mocked whole rather than module by module: this section reaches the keychain
+// and crypto, and through them the entire Expo runtime, which has nothing to
+// stand on here. These tests are about the screen's save flow and labels.
+vi.mock('./components/PushChannelSection', () => ({
+  PushChannelSection: () => null
+}))
+
 vi.mock('./transport/host-store', () => ({
   loadHosts: dependencies.loadHosts,
   updateHostNameAndEndpoint: dependencies.updateHostNameAndEndpoint

@@ -69,8 +69,8 @@ export default function NotificationsScreen() {
   const switchEnabled = pushEnabled && permissionState.granted
   const notificationsBlocked = permissionState.status === 'denied'
   const hint = notificationsBlocked
-    ? 'Notifications are disabled in system settings.'
-    : 'Get notified on this device when an agent needs your input or finishes a task.'
+    ? 'Notifications are off in system settings, so nothing can be shown — remote push included.'
+    : 'Raised by the app itself, so they only arrive while it is running. Remote push is not affected by this switch; with both on, one event can notify twice.'
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + spacing.sm }]}>
@@ -83,7 +83,7 @@ export default function NotificationsScreen() {
 
       <View style={styles.section}>
         <View style={styles.row}>
-          <Text style={styles.rowLabel}>Agent notifications</Text>
+          <Text style={styles.rowLabel}>Local notifications</Text>
           <Switch
             value={switchEnabled}
             disabled={notificationsBlocked}

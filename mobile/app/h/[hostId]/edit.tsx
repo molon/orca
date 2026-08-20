@@ -16,6 +16,7 @@ import { ChevronLeft } from 'lucide-react-native'
 import { colors, radii, spacing, typography } from '../../../src/theme/mobile-theme'
 import { loadHosts, updateHostNameAndEndpoint } from '../../../src/transport/host-store'
 import { displayHostEndpoint } from '../../../src/transport/host-endpoint'
+import { PushChannelSection } from '../../../src/components/PushChannelSection'
 import { resolveHostEndpointEdit } from '../../../src/transport/host-endpoint-edit'
 import { useForceReconnect, usePrimeHosts } from '../../../src/transport/client-context'
 import type { HostProfile } from '../../../src/transport/types'
@@ -185,11 +186,18 @@ export default function EditHostScreen() {
       ) : (
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          // iOS gets its inset handling from the ScrollView below; adding
+          // padding here too would lift the form twice.
+          behavior={Platform.OS === 'ios' ? undefined : 'height'}
         >
           <ScrollView
             contentContainerStyle={[styles.form, { paddingBottom: insets.bottom + spacing.xl }]}
             keyboardShouldPersistTaps="handled"
+            // Why this rather than the wrapper's padding alone: padding lifts the
+            // whole form but does not scroll to what has focus, so a field near
+            // the bottom stays under the keyboard. This is the platform's own
+            // behaviour and it scrolls the focused input into view.
+            automaticallyAdjustKeyboardInsets
           >
             <Text style={styles.help}>
               Change the display name or connection address. Address edits only switch where this
@@ -249,6 +257,8 @@ export default function EditHostScreen() {
             ) : null}
 
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
+
+            {hostId ? <PushChannelSection hostId={hostId} /> : null}
           </ScrollView>
         </KeyboardAvoidingView>
       )}

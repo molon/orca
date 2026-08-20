@@ -15,7 +15,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.stably.orca.mobile",
+      "bundleIdentifier": "com.molon.orca",
       "buildNumber": "1",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Orca connects to the desktop app on your LAN.",
@@ -74,12 +74,18 @@
       "usesCleartextTraffic": true,
       "allowBackup": false,
       "permissions": ["RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS"],
-      "package": "com.stably.orca.mobile",
+      "package": "com.molon.orca",
       "versionCode": 13
     },
     "plugins": [
       "expo-router",
       "./plugins/android-respect-rotation-lock.js",
+      [
+        "./plugins/notification-service-extension",
+        {
+          "appleTeamId": "PDL85JB6BQ"
+        }
+      ],
       [
         "expo-splash-screen",
         {

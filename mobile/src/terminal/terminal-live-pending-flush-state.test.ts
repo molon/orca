@@ -86,9 +86,24 @@ describe('terminal live mirror send queue', () => {
     }
 
     // When
-    const first = queueTerminalLiveMirrorSend(state, 'terminal-1', 'a', sender)
-    const second = queueTerminalLiveMirrorSend(state, 'terminal-1', 'b', sender)
-    const third = queueTerminalLiveMirrorSend(state, 'terminal-1', 'c', sender)
+    const first = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'a' },
+      sender
+    )
+    const second = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'b' },
+      sender
+    )
+    const third = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'c' },
+      sender
+    )
     await Promise.resolve()
 
     // Then
@@ -98,20 +113,70 @@ describe('terminal live mirror send queue', () => {
     expect(payloads).toEqual(['a', 'bc'])
   })
 
+  // Dictation rewrites its own transcript several times a second. Replaying each
+  // guess would draw and erase text the speaker never settled on.
+  it('Given revisions queued behind a send When it lands Then only the final text is drawn', async () => {
+    // Given
+    const state = createTerminalLivePendingFlushState()
+    const payloads: string[] = []
+    let resolveFirstSend: (value: boolean) => void = () => {}
+    const sender = async (_handle: string, payload: string): Promise<boolean> => {
+      payloads.push(payload)
+      if (payloads.length === 1) {
+        return new Promise<boolean>((resolve) => {
+          resolveFirstSend = resolve
+        })
+      }
+      return true
+    }
+
+    // When: "hi" lands, then the transcript guesses "hi there", corrects to
+    // "high", and settles on "higher"
+    const edit = (eraseCount: number, appendText: string): Promise<boolean> =>
+      queueTerminalLiveMirrorSend(state, 'terminal-1', { eraseCount, appendText }, sender)
+    const first = edit(0, 'hi')
+    const guess = edit(0, ' there')
+    const correction = edit(6, 'gh')
+    const settled = edit(0, 'er')
+    await Promise.resolve()
+    expect(payloads).toEqual(['hi'])
+    resolveFirstSend(true)
+
+    // Then: one plain append. The six erases cancelled text that never left the
+    // queue, so " there" was never drawn and never had to be rubbed out.
+    await expect(Promise.all([first, guess, correction, settled])).resolves.toEqual([
+      true,
+      true,
+      true,
+      true
+    ])
+    expect(payloads).toEqual(['hi', 'gher'])
+  })
+
   it('Given a failed previous send When a mirror send queues Then it still runs in order', async () => {
     // Given
     const state = createTerminalLivePendingFlushState()
     const order: string[] = []
-    const first = queueTerminalLiveMirrorSend(state, 'terminal-1', 'first', async () => {
-      order.push('first')
-      return false
-    })
+    const first = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'first' },
+      async () => {
+        order.push('first')
+        return false
+      }
+    )
 
     // When
-    const second = queueTerminalLiveMirrorSend(state, 'terminal-1', 'second', async () => {
-      order.push('second')
-      return true
-    })
+    const second = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'second' },
+      async () => {
+        order.push('second')
+        return true
+      }
+    )
 
     // Then
     await expect(first).resolves.toBe(false)
@@ -122,12 +187,22 @@ describe('terminal live mirror send queue', () => {
   it('Given a throwing send When a mirror send queues Then the promise resolves false and the chain continues', async () => {
     // Given
     const state = createTerminalLivePendingFlushState()
-    const first = queueTerminalLiveMirrorSend(state, 'terminal-1', 'first', async () => {
-      throw new Error('boom')
-    })
+    const first = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'first' },
+      async () => {
+        throw new Error('boom')
+      }
+    )
 
     // When
-    const second = queueTerminalLiveMirrorSend(state, 'terminal-1', 'second', async () => true)
+    const second = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'second' },
+      async () => true
+    )
 
     // Then
     await expect(first).resolves.toBe(false)
@@ -139,7 +214,12 @@ describe('terminal live mirror send queue', () => {
     const state = createTerminalLivePendingFlushState()
 
     // When
-    await queueTerminalLiveMirrorSend(state, 'terminal-1', 'payload', async () => true)
+    await queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'payload' },
+      async () => true
+    )
     await Promise.resolve()
 
     // Then
@@ -154,8 +234,18 @@ describe('terminal live mirror send queue', () => {
       new Promise((resolve) => {
         resolveSend = resolve
       })
-    const active = queueTerminalLiveMirrorSend(state, 'terminal-1', 'a', sender)
-    const pending = queueTerminalLiveMirrorSend(state, 'terminal-1', 'b', sender)
+    const active = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'a' },
+      sender
+    )
+    const pending = queueTerminalLiveMirrorSend(
+      state,
+      'terminal-1',
+      { eraseCount: 0, appendText: 'b' },
+      sender
+    )
 
     // When
     cancelTerminalLivePendingFlush(state)

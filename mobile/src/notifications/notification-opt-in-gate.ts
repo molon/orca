@@ -16,9 +16,10 @@ export async function shouldPresentNotificationOptIn(): Promise<boolean> {
       if (!permission.authorizationReflectsUserChoice) {
         return true
       }
-      // Why: an already-authorized device should inherit the useful default
-      // without seeing an onboarding decision it has effectively made.
-      await savePushNotificationsEnabled(true)
+      // Why false rather than true: permission is already granted, so remote
+      // push can show. Turning local delivery on as well would double up on a
+      // phone that has push, and this screen is not where that is decided.
+      await savePushNotificationsEnabled(false)
       return false
     }
     if (permission.status === 'denied' || !permission.canAskAgain) {

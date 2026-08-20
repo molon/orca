@@ -28,8 +28,15 @@ export type TerminalLiveMirrorStep = {
 function heldPreeditLength(
   fieldCodePoints: readonly string[],
   stableLength: number,
-  composing: boolean | undefined
+  composing: boolean | undefined,
+  dictating: boolean | undefined
 ): number {
+  // Dictation marks its transcript exactly like an input method marks a reading,
+  // so the marked range alone would hold a finished sentence back until the
+  // speaker pauses. A transcript is already text; only a reading is not.
+  if (dictating) {
+    return 0
+  }
   if (composing !== undefined) {
     return composing ? fieldCodePoints.length - stableLength : 0
   }
@@ -59,14 +66,18 @@ function commonPrefixLength(left: readonly string[], right: readonly string[]): 
 export function computeTerminalLiveMirrorStep(
   sentText: string,
   fieldText: string,
-  options: { readonly commitHeld: boolean; readonly composing?: boolean }
+  options: {
+    readonly commitHeld: boolean
+    readonly composing?: boolean
+    readonly dictating?: boolean
+  }
 ): TerminalLiveMirrorStep {
   const fieldCodePoints = Array.from(fieldText)
   const sentCodePoints = Array.from(sentText)
   const stableLength = commonPrefixLength(sentCodePoints, fieldCodePoints)
   const heldLength = options.commitHeld
     ? 0
-    : heldPreeditLength(fieldCodePoints, stableLength, options.composing)
+    : heldPreeditLength(fieldCodePoints, stableLength, options.composing, options.dictating)
   const targetCodePoints = fieldCodePoints.slice(0, fieldCodePoints.length - heldLength)
   const keptLength = Math.min(stableLength, targetCodePoints.length)
 

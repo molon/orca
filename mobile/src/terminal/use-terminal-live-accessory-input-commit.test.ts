@@ -55,7 +55,7 @@ function createAccessoryInputCommitHarness({
 }: AccessoryInputCommitHarnessOptions = {}): AccessoryInputCommitHarness {
   const activeHandle = 'terminal-a'
   const heldLiveInputTextRef: RefObject<string> = { current: heldText }
-  const sentLiveInputTextRef: RefObject<string> = { current: sentText }
+  const mirroredFieldTextRef: RefObject<string> = { current: sentText }
   const pendingLiveInputHandleRef: RefObject<string | null> = { current: pendingHandle }
   const liveInputRef: RefObject<TextInput | null> = { current: null }
   const liveInputTerminalHandles = new Set([activeHandle])
@@ -70,7 +70,6 @@ function createAccessoryInputCommitHarness({
   const clearPendingLiveInputCommit = vi.fn(() => {})
   const flushPendingLiveInputText = vi.fn(async (_expectedHandle: string | null) => flushResult)
   const waitForPendingLiveInputFlush = vi.fn(async () => waitResult)
-  const setLiveInputCapture = vi.fn((_text: string) => {})
 
   let commit: AccessoryInputCommitHarness['commit'] | null = null
   let renderer: ReactTestRenderer | null = null
@@ -85,9 +84,8 @@ function createAccessoryInputCommitHarness({
       liveInputRef,
       liveInputTerminalHandles,
       pendingLiveInputHandleRef,
-      sentLiveInputTextRef,
+      mirroredFieldTextRef,
       sendLiveTerminalInputRef,
-      setLiveInputCapture,
       waitForPendingLiveInputFlush
     })
     return null

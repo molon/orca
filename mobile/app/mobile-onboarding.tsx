@@ -126,8 +126,13 @@ function MobileOnboardingFlow({
       setBusyChoice(choice)
       setError(null)
       try {
-        const enabled = choice === 'enable' ? await ensureNotificationPermissions() : false
-        await savePushNotificationsEnabled(enabled)
+        // Permission is what this step is for: remote push needs it too, and
+        // without it nothing can be shown at all. The local-delivery switch is
+        // a separate, off-by-default fallback — see the Notifications screen.
+        if (choice === 'enable') {
+          await ensureNotificationPermissions()
+        }
+        await savePushNotificationsEnabled(false)
         advanceOrContinue()
       } catch {
         setError('Notification settings could not be updated. Try again.')

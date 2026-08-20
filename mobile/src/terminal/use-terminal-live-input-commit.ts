@@ -24,6 +24,8 @@ type TerminalLiveInputChangeEvent = {
   readonly nativeEvent: {
     readonly text: string
     readonly isComposing?: boolean
+    /** Dictation marks its transcript like an IME marks a reading; only this tells them apart. */
+    readonly isDictating?: boolean
   }
 }
 
@@ -68,13 +70,12 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     clearPendingLiveInputCommit,
     flushPendingLiveInputText,
     heldLiveInputTextRef,
+    mirroredFieldTextRef,
     pendingLiveInputHandleRef,
-    sentLiveInputTextRef,
     waitForPendingLiveInputFlush
   } = useTerminalLivePendingInputFlush({
     activeHandleRef,
     activeSessionTabTypeRef,
-    liveInputRef,
     liveInputTerminalHandlesRef,
     sendLiveTerminalInputRef,
     setLiveInputCapture
@@ -128,23 +129,15 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
         clearPendingLiveInputCommit()
         return
       }
-      // Why: iOS kills an active dictation/IME session when JS writes a value
-      // that differs from the native field text, so the controlled capture must
-      // echo the field verbatim; only the PTY mirror sees normalized text.
-      setLiveInputCapture(nativeEvent.text)
-      applyLiveInputMirror(
-        activeHandle,
-        normalizeTerminalTextInput(nativeEvent.text),
-        nativeEvent.isComposing
-      )
+      // Nothing is written back to the field here — a write that lands mid
+      // dictation ends the session, and one that does not land is invisible.
+      // The mirror publishes the capture from the line it maintains.
+      applyLiveInputMirror(activeHandle, normalizeTerminalTextInput(nativeEvent.text), {
+        composing: nativeEvent.isComposing,
+        dictating: nativeEvent.isDictating
+      })
     },
-    [
-      activeHandle,
-      applyLiveInputMirror,
-      clearPendingLiveInputCommit,
-      liveInputTerminalHandles,
-      setLiveInputCapture
-    ]
+    [activeHandle, applyLiveInputMirror, clearPendingLiveInputCommit, liveInputTerminalHandles]
   )
 
   const handleLiveInputKeyPress = useCallback(
@@ -159,7 +152,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       const decision = getTerminalLiveSpecialKeyDecision({
         key: event.nativeEvent.key,
         heldText: ownsPendingState ? heldLiveInputTextRef.current : '',
-        sentText: ownsPendingState ? sentLiveInputTextRef.current : ''
+        sentText: ownsPendingState ? mirroredFieldTextRef.current : ''
       })
       switch (decision.kind) {
         case 'ignore':
@@ -199,9 +192,8 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     liveInputRef,
     liveInputTerminalHandles,
     pendingLiveInputHandleRef,
-    sentLiveInputTextRef,
+    mirroredFieldTextRef,
     sendLiveTerminalInputRef,
-    setLiveInputCapture,
     waitForPendingLiveInputFlush
   })
 

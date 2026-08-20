@@ -28,9 +28,8 @@ type TerminalLiveAccessoryInputCommitOptions = {
   readonly liveInputRef: RefObject<TextInput | null>
   readonly liveInputTerminalHandles: ReadonlySet<string>
   readonly pendingLiveInputHandleRef: RefObject<string | null>
-  readonly sentLiveInputTextRef: RefObject<string>
+  readonly mirroredFieldTextRef: RefObject<string>
   readonly sendLiveTerminalInputRef: RefObject<TerminalLiveInputSender>
-  readonly setLiveInputCapture: (text: string) => void
   readonly waitForPendingLiveInputFlush: () => Promise<boolean>
 }
 
@@ -43,9 +42,8 @@ export function useTerminalLiveAccessoryInputCommit({
   liveInputRef,
   liveInputTerminalHandles,
   pendingLiveInputHandleRef,
-  sentLiveInputTextRef,
+  mirroredFieldTextRef,
   sendLiveTerminalInputRef,
-  setLiveInputCapture,
   waitForPendingLiveInputFlush
 }: TerminalLiveAccessoryInputCommitOptions): (
   input: TerminalLiveAccessoryInput
@@ -63,7 +61,7 @@ export function useTerminalLiveAccessoryInputCommit({
         clearPendingLiveInputCommit()
       }
       const heldText = ownsPendingState ? heldLiveInputTextRef.current : ''
-      const sentText = ownsPendingState ? sentLiveInputTextRef.current : ''
+      const sentText = ownsPendingState ? mirroredFieldTextRef.current : ''
       const decision = getTerminalLiveAccessoryBytesDecision({ ...input, heldText, sentText })
       switch (decision.kind) {
         case 'send-now':
@@ -78,8 +76,9 @@ export function useTerminalLiveAccessoryInputCommit({
             fieldText: sentText + heldText
           })
           // Why: accessory buttons do not emit native TextInput edits, so the
-          // field is edited here and the mirror diff syncs the PTY echo.
-          setLiveInputCapture(editedText)
+          // field is edited here and the mirror diff syncs the PTY echo. This is
+          // the one write left, and it happens on a tap rather than mid
+          // dictation; if iOS drops it, the next report diffs it back.
           liveInputRef.current?.setNativeProps({ text: editedText })
           applyLiveInputMirror(activeHandle, editedText)
           return { kind: 'handled' }
@@ -104,9 +103,8 @@ export function useTerminalLiveAccessoryInputCommit({
       liveInputRef,
       liveInputTerminalHandles,
       pendingLiveInputHandleRef,
-      sentLiveInputTextRef,
+      mirroredFieldTextRef,
       sendLiveTerminalInputRef,
-      setLiveInputCapture,
       waitForPendingLiveInputFlush
     ]
   )

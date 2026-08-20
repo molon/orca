@@ -42,7 +42,9 @@ describe('notification opt-in gate', () => {
     expect(getNotificationPermissionState).not.toHaveBeenCalled()
   })
 
-  it('adopts existing system authorization without prompting', async () => {
+  // Permission granted is not a decision about local delivery: remote push can
+  // already show, and turning this on too would double up.
+  it('records the decision without turning local delivery on', async () => {
     vi.mocked(readPushNotificationsPreference).mockResolvedValue({ value: null, loaded: true })
     vi.mocked(getNotificationPermissionState).mockResolvedValue({
       granted: true,
@@ -52,7 +54,7 @@ describe('notification opt-in gate', () => {
     })
 
     await expect(shouldPresentNotificationOptIn()).resolves.toBe(false)
-    expect(savePushNotificationsEnabled).toHaveBeenCalledWith(true)
+    expect(savePushNotificationsEnabled).toHaveBeenCalledWith(false)
   })
 
   it('still presents when a pre-Android 13 default grant is not an opt-in decision', async () => {

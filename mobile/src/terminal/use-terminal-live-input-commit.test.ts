@@ -17,6 +17,12 @@ function changeLiveInput(
   handlers.handleLiveInputChange({ nativeEvent: { text, isComposing } })
 }
 
+function dictateLiveInput(handlers: TerminalLiveInputCommitHandlers, text: string): void {
+  handlers.handleLiveInputChange({
+    nativeEvent: { text, isComposing: true, isDictating: true }
+  })
+}
+
 type TerminalLiveInputCommitHarness = {
   readonly captures: readonly string[]
   readonly handlers: TerminalLiveInputCommitHandlers
@@ -202,6 +208,84 @@ describe('terminal live input commit hook', () => {
     await vi.waitFor(() => expect(sent).toEqual(['한', '\r']))
   })
 
+  // iOS skips a JS text write while native change events are in flight, so the
+  // field keeps the line that already ran. Nothing may re-send it.
+  it('Given a submitted line the field still holds When dictation continues Then only the new words reach the terminal', async () => {
+    // Given
+    const { captures, handlers, sent } = createTerminalLiveInputCommitHarness()
+    changeLiveInput(handlers, 'hello', false)
+    handlers.handleLiveInputSubmit()
+    await vi.waitFor(() => expect(sent).toEqual(['hello', '\r']))
+
+    // When: the keyboard stayed up, so the report still carries the old line
+    changeLiveInput(handlers, 'hello world', false)
+
+    // Then
+    await vi.waitFor(() => expect(sent).toEqual(['hello', '\r', ' world']))
+    // And the status shows the live line, not the sentence that already ran
+    expect(captures.at(-1)).toBe(' world')
+  })
+
+  it('Given a submitted line the field still holds When dictation revises all of it Then erases only the live line', async () => {
+    // Given
+    const { handlers, sent } = createTerminalLiveInputCommitHarness()
+    changeLiveInput(handlers, 'hello', false)
+    handlers.handleLiveInputSubmit()
+    await vi.waitFor(() => expect(sent).toEqual(['hello', '\r']))
+    changeLiveInput(handlers, 'hello world', false)
+    await vi.waitFor(() => expect(sent).toEqual(['hello', '\r', ' world']))
+
+    // When: dictation rewrites the whole hypothesis, including the run sentence
+    changeLiveInput(handlers, 'Hello, world', false)
+
+    // Then: six DELs, the length of the live line — never reaching the run one
+    await vi.waitFor(() =>
+      expect(sent).toEqual(['hello', '\r', ' world', '\x7f\x7f\x7f\x7f\x7f\x7fHello, world'])
+    )
+  })
+
+  it('Given text the field kept across a keyboard dismissal When typing resumes Then appends instead of erasing', async () => {
+    // Given
+    const { handlers, sent } = createTerminalLiveInputCommitHarness()
+    changeLiveInput(handlers, 'abc', false)
+    await vi.waitFor(() => expect(sent).toEqual(['abc']))
+
+    // When: the keyboard closed and reopened; nothing reset, so the next report
+    // is the same field plus what was added
+    changeLiveInput(handlers, 'abcdef', false)
+
+    // Then
+    await vi.waitFor(() => expect(sent).toEqual(['abc', 'def']))
+  })
+
+  // Dictation marks its transcript, so without the dictation report every word
+  // would sit in the field until the speaker paused.
+  it('Given a dictated phrase When it is still marked Then it reaches the terminal as it arrives', async () => {
+    // Given
+    const { handlers, sent } = createTerminalLiveInputCommitHarness()
+
+    // When
+    dictateLiveInput(handlers, '你好')
+    await vi.waitFor(() => expect(sent).toEqual(['你好']))
+    dictateLiveInput(handlers, '你好世界')
+
+    // Then
+    await vi.waitFor(() => expect(sent).toEqual(['你好', '世界']))
+  })
+
+  it('Given a dictated phrase revised mid sentence Then only the changed tail is repaired', async () => {
+    // Given
+    const { handlers, sent } = createTerminalLiveInputCommitHarness()
+    dictateLiveInput(handlers, '你好吗')
+    await vi.waitFor(() => expect(sent).toEqual(['你好吗']))
+
+    // When
+    dictateLiveInput(handlers, '你好嘛')
+
+    // Then
+    await vi.waitFor(() => expect(sent).toEqual(['你好吗', '\x7f嘛']))
+  })
+
   it('Given no pending text When submit is requested Then sends only carriage return', async () => {
     // Given
     const { handlers, sent } = createTerminalLiveInputCommitHarness()
@@ -239,16 +323,16 @@ describe('terminal live input commit hook', () => {
     await vi.waitFor(() => expect(sent).toEqual(['a', 'b']))
   })
 
-  it('Given iOS smart-dash text When the change arrives Then the capture echoes the raw field text and the PTY gets normalized bytes', async () => {
+  it('Given iOS smart-dash text When the change arrives Then the capture reports the normalized line', async () => {
     // Given
     const { captures, handlers, sent } = createTerminalLiveInputCommitHarness()
 
     // When: iOS smart punctuation rewrote "--" into an en dash inside the field
     changeLiveInput(handlers, 'a–')
 
-    // Then: writing "a--" back into the controlled value would kill an active
-    // iOS dictation/IME session, so the capture must keep what iOS produced
-    expect(captures).toEqual(['a–'])
+    // Then: the capture is the terminal's line, not the field — the field is
+    // never written back, so it keeps the en dash and the line keeps the bytes
+    expect(captures).toEqual(['a--'])
     await vi.waitFor(() => expect(sent).toEqual(['a--']))
   })
 

@@ -38,6 +38,7 @@ import {
 } from '../src/transport/home-host-auto-connect'
 import { classifyConnection } from '../src/transport/connection-health'
 import { subscribeToDesktopNotifications } from '../src/notifications/mobile-notifications'
+import { resubscribePairedChannels } from '../src/notifications/push-channel-connect'
 import {
   loadMobileOnboardingSteps,
   mobileOnboardingDestination
@@ -280,6 +281,14 @@ export default function HomeScreen() {
       primeHosts(hosts)
     }
   }, [hosts, primeHosts])
+
+  // Why on launch and not on connect: a channel's publisher is a hook, not a
+  // paired desktop, so there is no connection whose establishment could carry
+  // this. An APNs token rotates silently, and re-subscribing here is what keeps
+  // that from becoming a phone that quietly stops receiving.
+  useEffect(() => {
+    void resubscribePairedChannels()
+  }, [])
   const allClientsRef = useRef<Array<{ hostId: string; client: RpcClient }>>([])
   // Why: keep the focus callback stable (no refetch per render) while still exposing the latest host clients.
   allClientsRef.current = allClients.map((entry) => ({

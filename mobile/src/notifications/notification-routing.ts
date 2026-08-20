@@ -20,6 +20,10 @@ export type LocalNotificationData = {
 export type NotificationNavigationOptions = {
   knownHostIds?: ReadonlySet<string>
   credentialStatusByHostId?: ReadonlyMap<string, HostCredentialStatus>
+  /** Lets a notification that names a directory route like one that names a
+   *  worktree. Only the app holds this list, which is why the resolution
+   *  happens on tap rather than at the sender. */
+  worktreeIdByPath?: ReadonlyMap<string, string>
 }
 
 function readNonEmptyString(value: unknown): string | null {
@@ -60,6 +64,19 @@ export function notificationCredentialRecoveryRoute(
   return target.credentialRecovery === 'retry' ? '/' : null
 }
 
+/** Trailing separators and a path that is simply absent are the two ways this
+ *  is called with something that cannot match, and neither is an error. */
+function resolveWorktreePath(
+  path: string | null,
+  worktreeIdByPath: ReadonlyMap<string, string> | undefined
+): string | null {
+  if (!path || !worktreeIdByPath) {
+    return null
+  }
+  const normalized = path.replace(/\/+$/, '')
+  return worktreeIdByPath.get(normalized) ?? worktreeIdByPath.get(path) ?? null
+}
+
 export function getNotificationNavigationTarget(
   data: unknown,
   options: NotificationNavigationOptions = {}
@@ -77,7 +94,13 @@ export function getNotificationNavigationTarget(
     return null
   }
 
-  const worktreeId = readNonEmptyString(record.worktreeId)
+  // A publisher that is not the paired desktop cannot know a worktree id, so
+  // it sends the directory the agent ran in. Resolving it here rather than at
+  // the sender keeps one routing rule for both, and the caller is the only side
+  // that holds the worktree list anyway.
+  const worktreeId =
+    readNonEmptyString(record.worktreeId) ??
+    resolveWorktreePath(readNonEmptyString(record.worktreePath), options.worktreeIdByPath)
   const credentialStatus = options.credentialStatusByHostId?.get(hostId)
   return {
     hostId,

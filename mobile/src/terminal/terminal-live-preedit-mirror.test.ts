@@ -302,3 +302,49 @@ describe('terminal live preedit mirror with no marked-text report', () => {
     })
   })
 })
+
+describe('dictation versus input-method composition', () => {
+  // Both arrive marked. Holding a reading is correct — it is not text yet.
+  // Holding a transcript is not: it is the finished sentence, and waiting for
+  // the speaker to pause is what makes live input feel dead.
+  it('Given a marked reading When it is not dictation Then nothing reaches the terminal', () => {
+    const step = computeTerminalLiveMirrorStep('', 'nihao', { commitHeld: false, composing: true })
+
+    expect(step.appendText).toBe('')
+    expect(step.heldText).toBe('nihao')
+  })
+
+  it('Given a marked transcript When it is dictation Then it reaches the terminal at once', () => {
+    const step = computeTerminalLiveMirrorStep('', '你好', {
+      commitHeld: false,
+      composing: true,
+      dictating: true
+    })
+
+    expect(step.appendText).toBe('你好')
+    expect(step.heldText).toBe('')
+  })
+
+  it('Given dictation revising what it already said Then the diff repairs it', () => {
+    const step = computeTerminalLiveMirrorStep('你好吗', '你好嘛', {
+      commitHeld: false,
+      composing: true,
+      dictating: true
+    })
+
+    expect(step.eraseCount).toBe(1)
+    expect(step.appendText).toBe('嘛')
+  })
+
+  // Without a marked-text report the trailing non-ASCII run is a guess that has
+  // to settle on a timer; dictation says outright that there is nothing to guess.
+  it('Given dictation on a platform that reports no marked range Then nothing is held', () => {
+    const step = computeTerminalLiveMirrorStep('', '你好', {
+      commitHeld: false,
+      dictating: true
+    })
+
+    expect(step.appendText).toBe('你好')
+    expect(step.heldText).toBe('')
+  })
+})
