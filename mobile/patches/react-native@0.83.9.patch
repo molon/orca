@@ -1,6 +1,8 @@
+diff --git a/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm b/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
+index d02e003a439e410ddab597b2c036256c80db0395..44cab4928b36011669f045f7be5dff1036f6de9e 100644
 --- a/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
 +++ b/React/Fabric/Mounting/ComponentViews/TextInput/RCTTextInputComponentView.mm
-@@ -703,6 +703,11 @@
+@@ -703,6 +703,11 @@ - (void)handleInputAccessoryDoneButton
  {
    return {
        .text = RCTStringFromNSString(_backedTextInputView.attributedText.string),
@@ -12,9 +14,11 @@
        .selectionRange = [self _selectionRange],
        .eventCount = static_cast<int>(_mostRecentEventCount),
        .contentOffset = RCTPointFromCGPoint(_backedTextInputView.contentOffset),
+diff --git a/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.cpp b/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.cpp
+index a9bc219f8bf729111e907423ca61b991fd712b46..a7f90ab4a5a024e322de3a1e4ac84d254c871112 100644
 --- a/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.cpp
 +++ b/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.cpp
-@@ -24,6 +24,14 @@
+@@ -24,6 +24,14 @@ static jsi::Value textInputMetricsPayload(
  
    payload.setProperty(runtime, "eventCount", textInputMetrics.eventCount);
  
@@ -29,6 +33,8 @@
    if (includeSelectionState) {
      auto selection = jsi::Object(runtime);
      selection.setProperty(
+diff --git a/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.h b/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.h
+index a3f2e01c130c1a53aee0b39e72927d21f2a6973d..9808259127a41ba39f5aeb2c32d12d622112f2cd 100644
 --- a/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.h
 +++ b/ReactCommon/react/renderer/components/textinput/TextInputEventEmitter.h
 @@ -7,6 +7,8 @@
@@ -40,7 +46,7 @@
  #include <react/renderer/attributedstring/AttributedString.h>
  #include <react/renderer/components/view/ViewEventEmitter.h>
  
-@@ -18,6 +20,8 @@
+@@ -18,6 +20,8 @@ class TextInputEventEmitter : public ViewEventEmitter {
  
    struct Metrics {
      std::string text;

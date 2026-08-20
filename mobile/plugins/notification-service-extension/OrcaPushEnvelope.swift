@@ -1,14 +1,14 @@
 import CryptoKit
 import Foundation
 
-/// Opens the envelope the desktop sealed for this device.
+/// Opens the envelope the publisher sealed for this channel.
 ///
-/// The desktop frames as nonce(12) || ciphertext || tag(16), which is exactly
+/// The publisher frames as nonce(12) || ciphertext || tag(16), which is exactly
 /// what `AES.GCM.SealedBox(combined:)` expects — so there is no framing code
-/// here and no dependency beyond CryptoKit. The framing is pinned by a test on
-/// the desktop side (mobile-push-envelope.test.ts); changing it there without
-/// changing it here breaks decryption on the phone while every desktop test
-/// still passes.
+/// here and no dependency beyond CryptoKit. The framing is pinned by
+/// push-envelope-swift-interop.test.ts, which compiles this very file; the
+/// publisher lives in another repository, so a change there that is not made
+/// here breaks decryption on the phone while both sides' own tests pass.
 enum OrcaPushEnvelope {
     struct Payload: Decodable {
         let source: String
