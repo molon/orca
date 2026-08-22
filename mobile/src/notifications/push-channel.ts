@@ -28,8 +28,29 @@ const KEY_BYTES = 32
  * same fix — copy the string again — and naming which byte was wrong invites
  * the reader to try to repair it by hand.
  */
-export async function parsePushChannelBlob(blob: string): Promise<PushChannel | null> {
-  const trimmed = blob.trim()
+/**
+ * The scheme setup encodes into the QR code.
+ *
+ * Why a scheme rather than the bare string in the code: one scanner reads both
+ * this and a host pairing offer, and it has to tell them apart before it can
+ * decide what to do — a bare base64 blob only announces what it is once it has
+ * been decoded and guessed at.
+ */
+const CHANNEL_URL_PREFIX = 'orca://push-channel?code='
+
+/** The string from the QR code, or the bare blob a paste supplies. */
+function extractBlob(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed.toLowerCase().startsWith(CHANNEL_URL_PREFIX)) {
+    return trimmed
+  }
+  // Not `new URL`: the code is base64url and Hermes' URL parser percent-escapes
+  // and reorders query strings, which corrupts it on the way back out.
+  return trimmed.slice(CHANNEL_URL_PREFIX.length)
+}
+
+export async function parsePushChannelBlob(input: string): Promise<PushChannel | null> {
+  const trimmed = extractBlob(input)
   if (trimmed.length === 0 || trimmed.length > MAX_BLOB_LENGTH) {
     return null
   }

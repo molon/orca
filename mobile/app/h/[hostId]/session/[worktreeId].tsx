@@ -2488,10 +2488,15 @@ export default function SessionScreen() {
     if (connState !== 'connected' || !pendingForegroundRecoveryRef.current) {
       return
     }
-    pendingForegroundRecoveryRef.current = false
+    // Why the guard comes before the flag is cleared: reconnect can land while
+    // the app is 'inactive' — the app switcher, a pulled-down notification, the
+    // moment a push tap is launching us. Clearing first consumed the pending
+    // recovery in exactly that window and nothing re-armed it, leaving a blanked
+    // WKWebView stale until a tab switch.
     if (AppState.currentState !== 'active') {
       return
     }
+    pendingForegroundRecoveryRef.current = false
     recoverActiveTerminalAfterForeground({
       activeHandleRef,
       terminalRefs,

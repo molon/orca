@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   ActivityIndicator,
   StyleSheet,
@@ -7,18 +7,12 @@ import {
   TouchableOpacity,
   View
 } from 'react-native'
+import { useFocusEffect, useRouter } from 'expo-router'
 import { colors } from '../theme/mobile-theme'
-import { parsePushChannelBlob } from '../notifications/push-channel'
-import {
-  deletePushChannel,
-  loadPushChannel,
-  savePushChannel
-} from '../notifications/push-channel-store'
-import {
-  subscribeToPushChannel,
-  unsubscribeFromPushChannel
-} from '../notifications/push-channel-subscription'
+import { deletePushChannel, loadPushChannel } from '../notifications/push-channel-store'
+import { unsubscribeFromPushChannel } from '../notifications/push-channel-subscription'
 import { loadChannelIdForHost, saveChannelIdForHost } from '../notifications/push-channel-index'
+import { attachPushChannel, describeAttachResult } from '../notifications/push-channel-attach'
 
 /**
  * Where a machine's pairing string is pasted.
@@ -29,6 +23,7 @@ import { loadChannelIdForHost, saveChannelIdForHost } from '../notifications/pus
  * supplies that, and what makes a tapped notification land in the right place.
  */
 export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.Element {
+  const router = useRouter()
   const [blob, setBlob] = useState('')
   const [channelId, setChannelId] = useState<string | null>(null)
   // Why a kind and not just text: "saved" and "could not reach the server" read
@@ -36,36 +31,24 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
   const [status, setStatus] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    void loadChannelIdForHost(hostId).then(setChannelId)
-  }, [hostId])
+  // On focus, not once on mount: the scanner attaches the channel on its own
+  // screen, so coming back from it is exactly when this is out of date.
+  useFocusEffect(
+    useCallback(() => {
+      void loadChannelIdForHost(hostId).then(setChannelId)
+    }, [hostId])
+  )
 
   const save = async (): Promise<void> => {
     setBusy(true)
     setStatus(null)
     try {
-      const channel = await parsePushChannelBlob(blob)
-      if (!channel) {
-        setStatus({ kind: 'warn', text: 'That is not a pairing string. Copy it again from setup.' })
-        return
+      const result = await attachPushChannel({ blob, hostId })
+      if (result.kind !== 'unrecognized') {
+        setChannelId(result.channelId)
+        setBlob('')
       }
-      await savePushChannel(channel, hostId)
-      await saveChannelIdForHost(hostId, channel.channelId)
-      const result = await subscribeToPushChannel(channel)
-      setChannelId(channel.channelId)
-      setBlob('')
-      // Saved either way: the key is what decrypts, and a phone that could not
-      // reach the server now will subscribe on its next launch.
-      setStatus(
-        result.kind === 'subscribed'
-          ? { kind: 'ok', text: 'Connected — notifications from that machine will arrive here.' }
-          : result.kind === 'unsupported'
-            ? { kind: 'warn', text: 'Saved, but this build cannot receive push.' }
-            : {
-                kind: 'warn',
-                text: `Saved, but the server did not answer (${result.reason}). It will retry on next launch.`
-              }
-      )
+      setStatus(describeAttachResult(result))
     } finally {
       setBusy(false)
     }
@@ -116,25 +99,34 @@ export function PushChannelSection({ hostId }: { hostId: string }): React.JSX.El
         </View>
       ) : (
         <View>
+          {/* Scanning first, because it is the path that does not involve moving
+              a 200-character string between two machines by hand. */}
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={() => router.push(`/push-channel-scan?hostId=${encodeURIComponent(hostId)}`)}
+            disabled={busy}
+          >
+            <Text style={styles.saveText}>Scan the code from setup</Text>
+          </TouchableOpacity>
           <TextInput
             style={styles.input}
             value={blob}
             onChangeText={setBlob}
-            placeholder="Paste the pairing string from setup"
+            placeholder="…or paste the string instead"
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             multiline
           />
           <TouchableOpacity
-            style={styles.saveButton}
+            style={styles.pasteButton}
             onPress={() => void save()}
             disabled={busy || blob.trim().length === 0}
           >
             {busy ? (
-              <ActivityIndicator color={colors.textPrimary} />
+              <ActivityIndicator color={colors.textSecondary} />
             ) : (
-              <Text style={styles.saveText}>Connect</Text>
+              <Text style={styles.pasteText}>Connect</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -158,6 +150,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     color: colors.textPrimary,
     fontSize: 13,
+    marginTop: 8,
     minHeight: 72,
     padding: 12,
     textAlignVertical: 'top'
@@ -170,6 +163,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12
   },
   saveText: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' },
+  pasteButton: { alignItems: 'center', marginTop: 8, paddingVertical: 8 },
+  pasteText: { color: colors.textSecondary, fontSize: 14 },
   removeButton: { marginTop: 8, paddingVertical: 8 },
   removeText: { color: colors.textSecondary, fontSize: 14 },
   hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17 },

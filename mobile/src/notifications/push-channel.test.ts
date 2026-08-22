@@ -17,6 +17,20 @@ function blob(value: unknown): string {
 }
 
 describe('push channel blob', () => {
+  it('reads the QR form, which is the same string behind a scheme', async () => {
+    const bare = blob({ provider: 'https://push.example', key: KEY_B64, authToken: 't' })
+    expect(await parsePushChannelBlob(`orca://push-channel?code=${bare}`)).toEqual(
+      await parsePushChannelBlob(bare)
+    )
+  })
+
+  // The camera hands over whatever it read, including a host pairing offer if
+  // the wrong code is in frame; that has to come back as "not ours", not as a
+  // channel built out of the wrong bytes.
+  it('refuses a pairing offer scanned into the channel scanner', async () => {
+    expect(await parsePushChannelBlob('orca://pair?code=eyJ2IjoxfQ==')).toBeNull()
+  })
+
   it('reads what setup printed', async () => {
     const channel = await parsePushChannelBlob(
       blob({ provider: 'https://push.example:8443', key: KEY_B64, authToken: 'server-secret' })
