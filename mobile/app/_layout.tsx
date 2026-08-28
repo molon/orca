@@ -9,6 +9,7 @@ import { colors } from '../src/theme/mobile-theme'
 import { OrcaLogo } from '../src/components/OrcaLogo'
 import { RpcClientProvider } from '../src/transport/client-context'
 import { getNotificationNavigationTarget } from '../src/notifications/notification-routing'
+import { startTerminalLivenessLog } from '../src/terminal/terminal-liveness-log'
 import { useOpenNotificationRoute } from '../src/notifications/use-open-notification-route'
 import { loadHostCatalog } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
@@ -42,6 +43,14 @@ export default function RootLayout() {
     // Why: pairing publication is journaled across process death; startup must
     // reconcile the server result before another scan can replace that journal.
     void recoverMobileRelayPairing()
+  }, [])
+
+  // Diagnostics for a terminal that stops painting and stops scrolling at the
+  // same moment. Started here rather than in the session screen so the trail
+  // also covers launching, connecting and recovery — the part that happens
+  // before that screen exists. Counters and flags only, never terminal content.
+  useEffect(() => {
+    startTerminalLivenessLog()
   }, [])
 
   // Why: route `orca://pair?...` deep links to the confirm screen so

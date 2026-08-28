@@ -145,6 +145,10 @@ import {
 } from '../../../../src/terminal/terminal-live-dictation-routing'
 import { countTerminalGestureInputSequences } from '../../../../src/terminal/terminal-gesture-input'
 import {
+  logTerminalLiveness,
+  noteTerminalConnState
+} from '../../../../src/terminal/terminal-liveness-log'
+import {
   recoverActiveTerminalAfterForeground,
   shouldRecoverTerminalOnAppStateChange
 } from '../../../../src/terminal/terminal-foreground-recovery'
@@ -1016,6 +1020,14 @@ export default function SessionScreen() {
   // Why: terminal gesture/input callbacks are stable/imperative, so keep their refs current before commit, not in a later effect.
   clientRef.current = client
   connStateRef.current = connState
+  // Diagnostics only: records that a terminal stopped painting and stopped
+  // scrolling together, which is the pair that says the document died while the
+  // app still thought it was ready. Counters and flags, never terminal content.
+  // Started from the root layout, not here, so the trail covers connecting and
+  // recovery too — the part that happens before this screen exists.
+  useEffect(() => {
+    noteTerminalConnState(connState)
+  }, [connState])
   activeSessionTabTypeRef.current = activeSessionTab?.type ?? null
   sessionTabsRef.current = sessionTabs
   activeSessionTabIdRef.current = activeSessionTabId
@@ -3071,6 +3083,8 @@ export default function SessionScreen() {
       }
       // Why: live-mirror deltas queued behind a dying send drain into the connect
       // wait and replay stale bytes after reconnect (#6713's `YZZYecho …` corruption).
+      // Lengths and verdicts only — never the text, which is what the user typed.
+      logTerminalLiveness('live-send', { len: text.length })
       return rpc
         .sendRequest(
           'terminal.send',
@@ -3082,7 +3096,19 @@ export default function SessionScreen() {
           }),
           TERMINAL_INPUT_SEND_OPTIONS
         )
-        .then(isTerminalSendRpcAccepted, () => false)
+        .then(
+          (result) => {
+            const accepted = isTerminalSendRpcAccepted(result)
+            logTerminalLiveness('live-send-done', { accepted })
+            return accepted
+          },
+          (error: unknown) => {
+            logTerminalLiveness('live-send-failed', {
+              reason: error instanceof Error ? error.message.slice(0, 60) : 'unknown'
+            })
+            return false
+          }
+        )
     },
     [showToast]
   )

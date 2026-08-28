@@ -819,6 +819,18 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
     }
   }
 
+  // Diagnostics: proof of life from inside the document itself.
+  //
+  // Without it, "the app received nothing from this WebView" is ambiguous — a
+  // healthy page that simply has nothing to report looks identical to one whose
+  // thread is wedged. A tick that only stops when the page stops has no second
+  // reading.
+  var orcaHeartbeatSeq = 0;
+  setInterval(function() {
+    orcaHeartbeatSeq += 1;
+    notify({ type: 'heartbeat', seq: orcaHeartbeatSeq });
+  }, 2000);
+
   function engineErrorText(err) {
     if (!err) return '';
     if (typeof err === 'string') return err;

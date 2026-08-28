@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
 import { AppState } from 'react-native'
+import { logTerminalLiveness } from './terminal-liveness-log'
 
 // Why: if the document dies before the glue can post anything (or the RN
 // message bridge never comes up), no webview error and no native handler
@@ -31,6 +32,7 @@ export function useTerminalWebReadyWatchdog(
         watchdogRef.current = setTimeout(fire, WEB_READY_WATCHDOG_MS)
         return
       }
+      logTerminalLiveness('watchdog-fired')
       reportEngineError(
         'Terminal did not initialize - no ready signal from the terminal view',
         true

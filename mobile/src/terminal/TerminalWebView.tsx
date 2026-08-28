@@ -9,6 +9,13 @@ import {
 } from './terminal-webview-engine-error-state'
 import { TERMINAL_WEBVIEW_FRAME_STYLES } from './terminal-webview-frame-styles'
 import { useTerminalWebReadyWatchdog } from './terminal-webview-ready-watchdog'
+import {
+  logTerminalLiveness,
+  noteTerminalHeartbeat,
+  noteTerminalReadiness,
+  noteTerminalWebViewMessage,
+  noteTerminalWebViewPost
+} from './terminal-liveness-log'
 import { XTERM_WEBVIEW_SOURCE } from './terminal-webview-html'
 import type { TerminalWebViewCommand } from './terminal-webview-messages'
 import { createTerminalWebViewPendingMessages } from './terminal-webview-pending-messages'
@@ -65,6 +72,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   )
 
   const sendToWebView = useCallback((msg: TerminalWebViewCommand) => {
+    noteTerminalWebViewPost()
     messageIdRef.current += 1
     const id = messageIdRef.current
     webViewRef.current?.postMessage(JSON.stringify({ ...msg, id }))
@@ -103,6 +111,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     (notifyParent: boolean) => {
       pendingPingIdRef.current = null
       isWebReadyRef.current = true
+      noteTerminalReadiness(true)
+      logTerminalLiveness('ready')
       clearWebReadyWatchdog()
       clearEngineError()
       if (notifyParent) {
@@ -125,10 +135,16 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 
   const handleMessage = useCallback(
     (event: WebViewMessageEvent) => {
+      // Before the parse: any byte at all proves the document is still running.
+      noteTerminalWebViewMessage()
       let msg: Record<string, unknown>
       try {
         msg = JSON.parse(event.nativeEvent.data) as Record<string, unknown>
       } catch {
+        return
+      }
+      if (msg.type === 'heartbeat') {
+        noteTerminalHeartbeat()
         return
       }
       routeTerminalQueryReply(msg, onTerminalQueryReply)
@@ -195,6 +211,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
 
   const handleLoadStart = useCallback(() => {
     isWebReadyRef.current = false
+    noteTerminalReadiness(false)
+    logTerminalLiveness('loadstart')
     pendingPingIdRef.current = null
     armWebReadyWatchdog()
     // Why: messages queued for a previous WebView generation are stale after a reload;
@@ -204,6 +222,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   }, [armWebReadyWatchdog, pendingMessages, writeCoalescer])
 
   const handleReload = useCallback(() => {
+    logTerminalLiveness('reload-tapped')
     clearEngineError()
     webViewRef.current?.reload()
   }, [clearEngineError])
@@ -211,7 +230,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   const handleContentProcessDidTerminate = useCallback(() => {
     // Why: WKWebView content-process loss is recoverable; stale commands belong
     // to the dead document and the replacement must prove readiness before replay.
+    logTerminalLiveness('contentprocessgone')
     isWebReadyRef.current = false
+    noteTerminalReadiness(false)
     pendingPingIdRef.current = null
     pendingMessages.clear()
     writeCoalescer.clear()
@@ -240,8 +261,10 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         // Why: direct ping is the only command allowed through while readiness is
         // invalid; init/write commands queue until this exact document answers.
         isWebReadyRef.current = false
+        noteTerminalReadiness(false)
         armWebReadyWatchdog()
         pendingPingIdRef.current = sendToWebView({ type: 'ping' })
+        logTerminalLiveness('foreground-ping', { pingId: pendingPingIdRef.current })
       },
       write(data: string) {
         writeCoalescer.write(data)
