@@ -12,7 +12,13 @@ const {
 // binary with its own process, entitlements, and Info.plist. That cannot be
 // expressed in app source, so the Xcode project has to grow a target — and
 // prebuild regenerates the project, so it has to happen here.
-const TARGET_NAME = 'OrcaNotificationService'
+// Names the Xcode target, its directory, and the suffix on the extension's
+// bundle identifier. Unprefixed on purpose: the identifier already begins with
+// the app's, so `OrcaNotificationService` spelled Orca twice in
+// com.molon.orca.OrcaNotificationService. Worth getting right before the
+// identifier is registered with Apple for distribution, because renaming it
+// after that means a new registration and new provisioning profiles.
+const TARGET_NAME = 'NotificationService'
 const SOURCE_FILES = [
   'NotificationService.swift',
   'OrcaPushEnvelope.swift',
