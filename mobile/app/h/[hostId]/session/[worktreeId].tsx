@@ -230,6 +230,11 @@ import {
   isDictationSetupRequiredError
 } from '../../../../src/dictation/mobile-dictation-setup'
 import { TerminalPaneView } from '../../../../src/session/TerminalPaneView'
+import { clearTerminalOnHostAndPane } from '../../../../src/session/terminal-clear-request'
+import {
+  noteTerminalSubscribeSucceeded,
+  planTerminalStreamRestart
+} from '../../../../src/session/terminal-subscribe-restart'
 import { useTerminalRepaintRecovery } from '../../../../src/session/use-terminal-repaint-recovery'
 import { MobileNativeChatOverlay } from '../../../../src/session/MobileNativeChatOverlay'
 import { MobileBrowserTabActionSheet } from '../../../../src/session/MobileBrowserTabActionSheet'
@@ -1390,10 +1395,17 @@ export default function SessionScreen() {
           const data = result as Record<string, unknown>
           diagnostics.firstStreamEvent(handle, seq, data.type)
           if (data.type === 'end' || data.type === 'error') {
+            // A stream that ends before it ever said `subscribed` never started;
+            // the pane is then left with no live output and nothing to scroll.
             unsubscribeTerminalRef.current(handle)
+            const restartMs = planTerminalStreamRestart(handle, seq, String(data.type))
+            if (restartMs !== null) {
+              scheduleDelayedAction(() => subscribeToTerminalRef.current?.(handle), restartMs)
+            }
             return
           }
           if (data.type === 'subscribed') {
+            noteTerminalSubscribeSucceeded(handle, seq)
             markNativeChatInputLeaseReady(handle)
             return
           }
@@ -1546,6 +1558,10 @@ export default function SessionScreen() {
     },
     [client, getTerminalRef, markNativeChatInputLeaseReady, scheduleDelayedAction, showToast]
   )
+  // Why a ref: a subscription that never started restarts itself, and the
+  // callback cannot name itself inside its own definition.
+  const subscribeToTerminalRef = useRef(subscribeToTerminal)
+  subscribeToTerminalRef.current = subscribeToTerminal
 
   const nativeChatStream = useMobileNativeChatTerminalStream({
     showNativeChat,
@@ -3113,9 +3129,6 @@ export default function SessionScreen() {
           (result) => {
             const accepted = isTerminalSendRpcAccepted(result)
             noteTerminalSend(accepted ? 'accepted' : 'failed')
-            if (!accepted) {
-              logTerminalLiveness('live-send-refused')
-            }
             return accepted
           },
           (error: unknown) => {
@@ -3478,20 +3491,8 @@ export default function SessionScreen() {
     showToast
   })
 
-  async function handleClearTerminal(target: Terminal) {
-    if (!client) {
-      return
-    }
-    getTerminalRef(target.handle)?.clear()
-    try {
-      await client.sendRequest('terminal.clearBuffer', {
-        terminal: target.handle
-      })
-      showToast('Terminal cleared')
-    } catch {
-      showToast("Couldn't clear terminal", 1500)
-    }
-  }
+  const handleClearTerminal = (target: Terminal): Promise<void> =>
+    clearTerminalOnHostAndPane(client, target.handle, getTerminalRef, showToast)
 
   // Why: hold-to-repeat matches iOS cadence (400ms then 45ms); non-repeatable keys fire once (holding is destructive).
   const repeatTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)

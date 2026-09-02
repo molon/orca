@@ -245,10 +245,7 @@ describe('TerminalWebView scroll routing', () => {
 
     const inputBlockStart = sessionSource.indexOf('const handleTerminalInput = useCallback')
     expect(inputBlockStart).toBeGreaterThanOrEqual(0)
-    const inputBlockEnd = sessionSource.indexOf(
-      'async function handleClearTerminal',
-      inputBlockStart
-    )
+    const inputBlockEnd = sessionSource.indexOf('handleClearTerminal', inputBlockStart)
     expect(inputBlockEnd).toBeGreaterThan(inputBlockStart)
     const inputBlock = sessionSource.slice(inputBlockStart, inputBlockEnd)
     expect(inputBlock).toContain('!isGestureMouseTrackingMode(modes?.mouseTrackingMode)')
