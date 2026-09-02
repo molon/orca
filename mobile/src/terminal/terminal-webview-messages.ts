@@ -22,6 +22,7 @@ export type TerminalWebViewCommand =
   | { type: 'reflow'; id?: number; cols: number; rows: number }
   | { type: 'clear'; id?: number }
   | { type: 'measure'; id?: number; containerHeight?: number }
+  | { type: 'repaint'; id?: number }
   | { type: 'reset-zoom'; id?: number }
   | { type: 'cancel-select'; id?: number }
   | { type: 'do-select-all'; id?: number }

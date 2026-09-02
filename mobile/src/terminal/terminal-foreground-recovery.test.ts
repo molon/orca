@@ -31,14 +31,17 @@ type RecoveryHarness = {
   subscribeToTerminal: ReturnType<typeof vi.fn<(handle: string) => void>>
   schedule: ReturnType<typeof vi.fn<(fn: () => void, ms: number) => void>>
   runScheduled: () => void
+  repaint: ReturnType<typeof vi.fn<() => void>>
 }
 
 function createHarness(): RecoveryHarness {
   const scheduled: Array<() => void> = []
+  const repaint = vi.fn()
   return {
+    repaint,
     activeHandleRef: { current: 'term-1' },
     terminalRefs: {
-      current: new Map([['term-1', {} as TerminalWebViewHandle]])
+      current: new Map([['term-1', { repaint } as unknown as TerminalWebViewHandle]])
     },
     initializedHandlesRef: { current: new Set(['term-1']) },
     connStateRef: { current: 'connected' },
@@ -85,7 +88,9 @@ describe('terminal foreground recovery', () => {
 
   it('marks inactive mounted terminal buffers stale so their next activation can replay', () => {
     const harness = createHarness()
-    harness.terminalRefs.current.set('term-2', {} as TerminalWebViewHandle)
+    harness.terminalRefs.current.set('term-2', {
+      repaint: harness.repaint
+    } as unknown as TerminalWebViewHandle)
     harness.initializedHandlesRef.current.add('term-2')
 
     const recovered = recoverActiveTerminalAfterForeground(harness)
@@ -141,6 +146,31 @@ describe('terminal foreground recovery', () => {
     harness.runScheduled()
 
     expect(harness.subscribeToTerminal).not.toHaveBeenCalled()
+  })
+
+  it('repaints every mounted pane, including while the socket is still down', () => {
+    const harness = createHarness()
+    harness.terminalRefs.current.set('term-2', {
+      repaint: harness.repaint
+    } as unknown as TerminalWebViewHandle)
+    harness.connStateRef.current = 'connecting'
+
+    expect(recoverActiveTerminalAfterForeground(harness)).toBe('deferred')
+
+    // Both panes, and without waiting for the connection: iOS drops the backing
+    // store of hidden panes too, and the socket is usually still down at this
+    // edge — deferring the repaint is what left a stale picture on screen.
+    expect(harness.repaint).toHaveBeenCalledTimes(2)
+  })
+
+  it('repaints the pane being activated, which the page cannot detect itself', () => {
+    // Hidden panes are hidden with opacity, so WebKit reports every one visible
+    // and the page's own visibilitychange recovery never fires.
+    const switchTab = sliceSessionSource(
+      'const switchTab = useCallback(',
+      'const switchSessionTab = useCallback('
+    )
+    expect(switchTab).toContain('getTerminalRef(handle)?.repaint()')
   })
 
   it('is wired to AppState foregrounding in the session screen', () => {

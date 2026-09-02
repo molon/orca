@@ -51,6 +51,9 @@ type TerminalLiveInputCommitHandlers = {
   readonly handleLiveInputChange: (event: TerminalLiveInputChangeEvent) => void
   readonly handleLiveInputKeyPress: (event: TerminalLiveInputKeyPressEvent) => void
   readonly handleLiveInputSubmit: () => void
+  /** Puts the remembered line back in the field after an in-place recovery,
+   *  which repairs the pane without ever changing the active handle. */
+  readonly restoreLiveInputLine: () => void
 }
 
 export function useTerminalLiveInputCommit<TTabType extends string>({
@@ -66,9 +69,12 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
   setLiveInputCapture
 }: TerminalLiveInputCommitOptions<TTabType>): TerminalLiveInputCommitHandlers {
   const {
+    adoptLiveInputLine,
     applyLiveInputMirror,
     clearPendingLiveInputCommit,
     flushPendingLiveInputText,
+    parkLiveInputLine,
+    readLiveInputLine,
     heldLiveInputTextRef,
     mirroredFieldTextRef,
     pendingLiveInputHandleRef,
@@ -88,23 +94,51 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     }
   }, [connected, clearPendingLiveInputCommit])
 
-  useEffect(() => {
-    const pendingHandle = pendingLiveInputHandleRef.current
-    if (!pendingHandle) {
+  const restoreLiveInputLine = useCallback((): void => {
+    const handle = activeHandleRef.current
+    if (!handle || !liveInputTerminalHandlesRef.current.has(handle)) {
       return
     }
+    const restored = readLiveInputLine(handle)
+    if (restored.length === 0) {
+      return
+    }
+    liveInputRef.current?.setNativeProps({ text: restored })
+    adoptLiveInputLine(handle, restored)
+  }, [
+    activeHandleRef,
+    adoptLiveInputLine,
+    liveInputRef,
+    liveInputTerminalHandlesRef,
+    readLiveInputLine
+  ])
+
+  useEffect(() => {
+    const pendingHandle = pendingLiveInputHandleRef.current
     // Why: a lagging mobile tab list briefly yields no active tab object; a
     // null/undefined type is "unknown", not "left the terminal" — flush guards
     // still block sends if the tab truly changed.
-    if (
-      !activeHandle ||
-      pendingHandle !== activeHandle ||
-      (activeSessionTabType != null && activeSessionTabType !== 'terminal') ||
-      !liveInputTerminalHandles.has(activeHandle)
-    ) {
-      clearPendingLiveInputCommit()
+    const onTerminal =
+      activeHandle != null &&
+      (activeSessionTabType == null || activeSessionTabType === 'terminal') &&
+      liveInputTerminalHandles.has(activeHandle)
+    if (pendingHandle && (!onTerminal || pendingHandle !== activeHandle)) {
+      // Parked, not cleared: the sentence is still in the terminal it was typed
+      // into, so leaving the tab must not forget it — coming back used to show
+      // an empty field for a prompt that was not empty.
+      parkLiveInputLine()
     }
-  }, [activeHandle, activeSessionTabType, clearPendingLiveInputCommit, liveInputTerminalHandles])
+    if (!onTerminal || pendingLiveInputHandleRef.current === activeHandle) {
+      return
+    }
+    restoreLiveInputLine()
+  }, [
+    activeHandle,
+    activeSessionTabType,
+    liveInputTerminalHandles,
+    parkLiveInputLine,
+    restoreLiveInputLine
+  ])
 
   const flushPendingLiveInputBeforeExternalSend = useCallback(
     async (handle: string): Promise<boolean> => {
@@ -213,6 +247,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
-    handleLiveInputSubmit
+    handleLiveInputSubmit,
+    restoreLiveInputLine
   }
 }

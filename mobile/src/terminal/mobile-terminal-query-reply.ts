@@ -1,6 +1,7 @@
 import { isTerminalQueryReply } from '../../../src/shared/terminal-query-reply'
 import type { RpcClient } from '../transport/rpc-client'
 import { isTerminalSendRpcAccepted } from './terminal-send-rpc-response'
+import { logTerminalLiveness } from './terminal-liveness-log'
 
 type TerminalSubscriptionRegistry = {
   has: (handle: string) => boolean
@@ -48,4 +49,15 @@ export function sendMobileTerminalQueryReply({
       ...(clientId ? { client: { id: clientId, type: 'mobile' as const } } : {})
     })
     .then(isTerminalSendRpcAccepted, () => false)
+    .then((accepted) => {
+      // Diagnostics: refused means nobody answered, because a subscribed mobile
+      // xterm has already silenced main's responder. A program that probes the
+      // terminal on startup then waits on a reply that is never coming.
+      logTerminalLiveness('query-reply', {
+        handle: handle.slice(-8),
+        bytes: JSON.stringify(bytes),
+        accepted
+      })
+      return accepted
+    })
 }

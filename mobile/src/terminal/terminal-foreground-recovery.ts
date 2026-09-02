@@ -42,6 +42,17 @@ export function recoverActiveTerminalAfterForeground({
   schedule,
   delayMs = TERMINAL_FOREGROUND_RECOVERY_DELAY_MS
 }: TerminalForegroundRecoveryOptions): TerminalForegroundRecoveryOutcome {
+  // Before the connection check, and for every mounted pane rather than the
+  // active one: a backing store iOS dropped while backgrounded is a local
+  // problem with a local fix, and waiting on a socket that is usually dead at
+  // this edge is what left panes showing a stale picture until a tab switch.
+  //
+  // The page has its own copy of this on `visibilitychange`, which never runs:
+  // hidden panes are hidden with opacity, so WebKit reports every one of them
+  // visible and the event it is waiting for is never delivered.
+  for (const mounted of terminalRefs.current.values()) {
+    mounted.repaint()
+  }
   if (connStateRef.current !== 'connected') {
     return 'deferred'
   }

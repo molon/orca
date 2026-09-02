@@ -1,5 +1,5 @@
 import { ActivityIndicator, Pressable, type StyleProp, type ViewStyle } from 'react-native'
-import { ImagePlus, Mic } from 'lucide-react-native'
+import { ImagePlus, Mic, RefreshCw } from 'lucide-react-native'
 import { colors } from '../theme/mobile-theme'
 
 type DictationState = {
@@ -22,6 +22,10 @@ type MobileTerminalInputActionsProps = {
   readonly onDictationPressIn: () => void
   readonly onDictationPressOut: () => void
   readonly onDictationCancel: () => void
+  /** Repaints the frozen pane and files a diagnostic snapshot in one tap. */
+  readonly onRepaint: () => void
+  readonly onShareSnapshot: () => void
+  readonly repaintBusy: boolean
 }
 
 // Image + mic peer actions shared by the live and buffered input bars so both
@@ -39,7 +43,10 @@ export function MobileTerminalInputActions({
   onDictationToggle,
   onDictationPressIn,
   onDictationPressOut,
-  onDictationCancel
+  onDictationCancel,
+  onRepaint,
+  onShareSnapshot,
+  repaintBusy
 }: MobileTerminalInputActionsProps) {
   const dictationActive = dictation.isStarting || dictation.isRecording
   return (
@@ -94,6 +101,21 @@ export function MobileTerminalInputActions({
             color={dictationActive ? colors.textPrimary : colors.textSecondary}
             strokeWidth={2.4}
           />
+        )}
+      </Pressable>
+      <Pressable
+        style={[buttonStyle, !canSend && disabledButtonStyle]}
+        disabled={!canSend || repaintBusy}
+        onPress={onRepaint}
+        onLongPress={onShareSnapshot}
+        delayLongPress={350}
+        accessibilityLabel="Redraw the terminal"
+        accessibilityHint="Forces the terminal to repaint and saves a diagnostic snapshot; long press to send the last one"
+      >
+        {repaintBusy ? (
+          <ActivityIndicator size="small" color={colors.textSecondary} />
+        ) : (
+          <RefreshCw size={16} color={colors.textSecondary} strokeWidth={2.4} />
         )}
       </Pressable>
     </>

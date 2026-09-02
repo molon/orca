@@ -2,6 +2,7 @@ import {
   parseTerminalKeyboardAvoidanceMetrics,
   type TerminalSelectionEvents
 } from './terminal-webview-contract'
+import { logTerminalLiveness } from './terminal-liveness-log'
 
 export type TerminalWebViewNotificationHandlers = Omit<
   TerminalSelectionEvents,
@@ -17,8 +18,12 @@ export function dispatchTerminalWebViewNotification(
   handlers: TerminalWebViewNotificationHandlers
 ) {
   if (msg.type === 'log') {
-    // Surface fit-scale diagnostics in the RN/Metro console.
     const tag = typeof msg.tag === 'string' ? msg.tag : '[fit]'
+    // Into the file log too: these five sites report a lost WebGL context, a
+    // failed measure and a swap that never committed — every one of them a way
+    // the terminal stops painting — and the console they used to go to does not
+    // exist in a release build on a phone.
+    logTerminalLiveness('page-log', { tag, payload: JSON.stringify(msg.payload ?? null) })
     // eslint-disable-next-line no-console
     console.log(tag, msg.payload)
   } else if (msg.type === 'error') {

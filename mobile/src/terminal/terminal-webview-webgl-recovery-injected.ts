@@ -51,6 +51,21 @@ export const TERMINAL_WEBGL_RECOVERY_JS = `
     }
   }
 
+  // Everything the visibility path below does, plus a nudge to the write queue,
+  // since a stuck queue and dropped GPU pixels look identical from the outside.
+  //
+  // Safe to call on a healthy terminal, which is what lets the app run it on
+  // every activation rather than only from the recovery button: pumpWrites
+  // releases a drain only once it has been stalled past the watchdog threshold,
+  // so a write genuinely mid-parse is never raced by a second one.
+  function forceTerminalRepaint() {
+    pumpWrites(terminalGeneration);
+    applyTerminalTheme(terminalThemeInput);
+    try { if (webglAddon && webglAddon.clearTextureAtlas) webglAddon.clearTextureAtlas(); } catch (e) {}
+    refreshTerminalSurface();
+    flog('forced-repaint', { gen: terminalGeneration, queued: writeQueue.length - writeQueueHead });
+  }
+
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState !== 'visible') return;
     // Why: iOS may restore the xterm model while discarding GPU pixels/theme

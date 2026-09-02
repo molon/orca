@@ -4,6 +4,7 @@ import type { TextInput } from 'react-native'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalLiveInputSender } from './terminal-live-input-sender'
 import { TERMINAL_LIVE_HELD_PREEDIT_COMMIT_DELAY_MS } from './terminal-live-preedit-mirror'
+import { forgetAllTerminalLiveInputLines } from './terminal-live-input-line-store'
 import { useTerminalLiveInputCommit } from './use-terminal-live-input-commit'
 
 type TerminalLiveInputCommitHandlers = ReturnType<typeof useTerminalLiveInputCommit<string>>
@@ -40,6 +41,8 @@ type TerminalLiveInputCommitHarnessOptions = {
 function createTerminalLiveInputCommitHarness({
   sendResult = true
 }: TerminalLiveInputCommitHarnessOptions = {}): TerminalLiveInputCommitHarness {
+  // The line store is module state by design, so each harness starts it clean.
+  forgetAllTerminalLiveInputLines()
   const activeHandle = 'terminal-a'
   const activeHandleRef: RefObject<string | null> = { current: activeHandle }
   const activeSessionTabTypeRef: RefObject<string | null> = { current: 'terminal' }

@@ -14,7 +14,8 @@ import {
   noteTerminalHeartbeat,
   noteTerminalReadiness,
   noteTerminalWebViewMessage,
-  noteTerminalWebViewPost
+  noteTerminalWebViewPost,
+  noteTerminalWrite
 } from './terminal-liveness-log'
 import { XTERM_WEBVIEW_SOURCE } from './terminal-webview-html'
 import type { TerminalWebViewCommand } from './terminal-webview-messages'
@@ -45,7 +46,9 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     onTerminalTap,
     onFileTap,
     onOpenUrl,
-    onTextScaleChange
+    onTextScaleChange,
+    diagnosticHandle,
+    diagnosticActive
   },
   ref
 ) {
@@ -112,7 +115,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
       pendingPingIdRef.current = null
       isWebReadyRef.current = true
       noteTerminalReadiness(true)
-      logTerminalLiveness('ready')
+      logTerminalLiveness('ready', { handle: diagnosticHandle })
       clearWebReadyWatchdog()
       clearEngineError()
       if (notifyParent) {
@@ -144,7 +147,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         return
       }
       if (msg.type === 'heartbeat') {
-        noteTerminalHeartbeat()
+        noteTerminalHeartbeat(diagnosticHandle ?? 'unknown', diagnosticActive === true, msg)
         return
       }
       routeTerminalQueryReply(msg, onTerminalQueryReply)
@@ -193,6 +196,8 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
     },
     [
       confirmWebReady,
+      diagnosticActive,
+      diagnosticHandle,
       reportEngineError,
       onSelectionMode,
       onSelectionCopy,
@@ -212,7 +217,7 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
   const handleLoadStart = useCallback(() => {
     isWebReadyRef.current = false
     noteTerminalReadiness(false)
-    logTerminalLiveness('loadstart')
+    logTerminalLiveness('loadstart', { handle: diagnosticHandle })
     pendingPingIdRef.current = null
     armWebReadyWatchdog()
     // Why: messages queued for a previous WebView generation are stale after a reload;
@@ -264,10 +269,20 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
         noteTerminalReadiness(false)
         armWebReadyWatchdog()
         pendingPingIdRef.current = sendToWebView({ type: 'ping' })
-        logTerminalLiveness('foreground-ping', { pingId: pendingPingIdRef.current })
+        logTerminalLiveness('foreground-ping', {
+          pingId: pendingPingIdRef.current
+        })
       },
+      // Counted per terminal below: the global post tally cannot say whether
+      // output reached the terminal on screen or a different one.
       write(data: string) {
         writeCoalescer.write(data)
+        noteTerminalWrite(
+          diagnosticHandle ?? 'unknown',
+          diagnosticActive === true,
+          data.length,
+          data
+        )
       },
       init(
         cols: number,
@@ -349,6 +364,11 @@ export const TerminalWebView = forwardRef<TerminalWebViewHandle, Props>(function
             }
           }, 2000)
         })
+      },
+      repaint() {
+        // Direct, not queued: a pane worth repainting may be one whose readiness
+        // flag is wrong, and queueing behind that is how it stays frozen.
+        sendToWebView({ type: 'repaint' })
       },
       resetZoom() {
         postMessage({ type: 'reset-zoom' })

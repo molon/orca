@@ -1,3 +1,4 @@
+import { logTerminalLiveness } from '../terminal/terminal-liveness-log'
 const MOBILE_TERMINAL_DIAGNOSTIC_TAG = '[terminal-diagnostic]'
 
 type MobileTerminalDiagnosticValue = string | number | boolean | null | undefined
@@ -41,6 +42,14 @@ export function logMobileTerminalDiagnostic(
   event: string,
   details: MobileTerminalDiagnosticDetails = {}
 ): void {
+  // Into the file first, and in release builds too. These events are the only
+  // account of why a terminal did or did not get its output stream, and the
+  // console they were written for cannot be read from a device without a cable
+  // — so on the build where the fault actually happens they reached nobody.
+  logTerminalLiveness(
+    `td:${event}`,
+    details as Record<string, string | number | boolean | null | undefined>
+  )
   // Why: lifecycle diagnostics are intentionally available for HMR repros,
   // but high-frequency WebView events must not add production log overhead.
   if (typeof __DEV__ !== 'undefined' && !__DEV__) {

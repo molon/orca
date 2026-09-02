@@ -146,7 +146,8 @@ import {
 import { countTerminalGestureInputSequences } from '../../../../src/terminal/terminal-gesture-input'
 import {
   logTerminalLiveness,
-  noteTerminalConnState
+  noteTerminalConnState,
+  noteTerminalSend
 } from '../../../../src/terminal/terminal-liveness-log'
 import {
   recoverActiveTerminalAfterForeground,
@@ -229,6 +230,7 @@ import {
   isDictationSetupRequiredError
 } from '../../../../src/dictation/mobile-dictation-setup'
 import { TerminalPaneView } from '../../../../src/session/TerminalPaneView'
+import { useTerminalRepaintRecovery } from '../../../../src/session/use-terminal-repaint-recovery'
 import { MobileNativeChatOverlay } from '../../../../src/session/MobileNativeChatOverlay'
 import { MobileBrowserTabActionSheet } from '../../../../src/session/MobileBrowserTabActionSheet'
 import { useMobileNativeChatController } from '../../../../src/session/use-mobile-native-chat-controller'
@@ -972,7 +974,8 @@ export default function SessionScreen() {
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
-    handleLiveInputSubmit
+    handleLiveInputSubmit,
+    restoreLiveInputLine
   } = useTerminalLiveInputCommit({
     activeHandle,
     activeHandleRef,
@@ -2844,6 +2847,9 @@ export default function SessionScreen() {
         initializedHandlesRef.current.delete(handle)
       }
       subscribeToTerminal(handle)
+      // Activation is the other moment the page cannot detect for itself: it is
+      // never told it became visible, because it was never told it was hidden.
+      getTerminalRef(handle)?.repaint()
       if (client) {
         if (matchingTab) {
           void activateMobileSessionTab(client, {
@@ -3083,8 +3089,15 @@ export default function SessionScreen() {
       }
       // Why: live-mirror deltas queued behind a dying send drain into the connect
       // wait and replay stale bytes after reconnect (#6713's `YZZYecho …` corruption).
-      // Lengths and verdicts only — never the text, which is what the user typed.
-      logTerminalLiveness('live-send', { len: text.length })
+      // Counted, not written: a line per keystroke evicted the very failure the
+      // log exists to catch. Only a send that fails earns its own line.
+      noteTerminalSend('attempt')
+      // The payload itself, so a report can be lined up against what was
+      // actually typed instead of guessed at. Diagnostic build only — this is
+      // the one place the log holds content, and it comes out with the rest of
+      // the instrumentation once the fault is understood.
+      const target = activeHandleRef.current
+      logTerminalLiveness('typed', { handle, activeHandle: target, text: JSON.stringify(text) })
       return rpc
         .sendRequest(
           'terminal.send',
@@ -3099,10 +3112,14 @@ export default function SessionScreen() {
         .then(
           (result) => {
             const accepted = isTerminalSendRpcAccepted(result)
-            logTerminalLiveness('live-send-done', { accepted })
+            noteTerminalSend(accepted ? 'accepted' : 'failed')
+            if (!accepted) {
+              logTerminalLiveness('live-send-refused')
+            }
             return accepted
           },
           (error: unknown) => {
+            noteTerminalSend('failed')
             logTerminalLiveness('live-send-failed', {
               reason: error instanceof Error ? error.message.slice(0, 60) : 'unknown'
             })
@@ -3444,6 +3461,22 @@ export default function SessionScreen() {
       subscribedTerminals: terminalUnsubsRef.current
     })
   }, [])
+
+  const repaintActions = useTerminalRepaintRecovery({
+    activeHandleRef,
+    getTerminalRef,
+    describeContext: () => ({ hostId, worktreeId, tab: activeSessionTabIdRef.current }),
+    resubscribe: (target) => {
+      // The cure the user already knows works, applied to one pane: drop the
+      // subscription and take it again, which re-fits the host to the phone and
+      // replays the buffer this pane may have stopped receiving.
+      unsubscribeTerminal(target)
+      initializedHandlesRef.current.delete(target)
+      subscribeToTerminal(target)
+    },
+    restoreLiveInputLine,
+    showToast
+  })
 
   async function handleClearTerminal(target: Terminal) {
     if (!client) {
@@ -5012,6 +5045,7 @@ export default function SessionScreen() {
                       onDictationPressIn={handleDictationPressIn}
                       onDictationPressOut={handleDictationPressOut}
                       onDictationCancel={cancelDictation}
+                      {...repaintActions}
                     />
                     <TextInput
                       ref={liveInputRef}
@@ -5087,6 +5121,7 @@ export default function SessionScreen() {
                       onDictationPressIn={handleDictationPressIn}
                       onDictationPressOut={handleDictationPressOut}
                       onDictationCancel={cancelDictation}
+                      {...repaintActions}
                     />
                     <Pressable
                       style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}

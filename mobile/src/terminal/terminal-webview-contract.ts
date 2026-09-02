@@ -45,6 +45,11 @@ function toNonNegativeInteger(value: unknown): number {
 export type MobileTerminalTheme = RuntimeMobileTerminalTheme
 
 export type TerminalSelectionEvents = {
+  /** Diagnostics only: lets the liveness log say which terminal stalled, and
+   *  whether it was the one on screen. A hidden WebView having its timers
+   *  throttled by iOS is expected; the visible one stalling is the bug. */
+  diagnosticHandle?: string
+  diagnosticActive?: boolean
   onSelectionMode?: (active: boolean) => void
   onSelectionCopy?: (text: string) => void
   onSelectionEvicted?: () => void
@@ -92,6 +97,9 @@ export type TerminalWebViewHandle = {
   reflow: (cols: number, rows: number) => void
   clear: () => void
   measureFitDimensions: (containerHeight?: number) => Promise<{ cols: number; rows: number } | null>
+  /** Rebuilds the atlas, repaints every row and releases a stalled write drain.
+   *  The manual escape from a pane that has stopped updating. */
+  repaint: () => void
   resetZoom: () => void
   cancelSelect: () => void
   doSelectAll: () => void

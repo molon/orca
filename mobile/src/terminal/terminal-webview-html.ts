@@ -12,6 +12,8 @@ import { TERMINAL_WEBVIEW_THEME_JS } from './terminal-webview-theme-injected'
 import { TERMINAL_QUERY_REPLY_JS } from './terminal-webview-query-reply-injected'
 import { URL_TAP_WEBVIEW_JS } from './terminal-webview-url-tap'
 import { TERMINAL_WEBGL_RECOVERY_JS } from './terminal-webview-webgl-recovery-injected'
+import { TERMINAL_HEARTBEAT_JS } from './terminal-webview-heartbeat-injected'
+import { TERMINAL_WRITE_DRAIN_RECOVERY_JS } from './terminal-webview-write-drain-recovery-injected'
 import { TERMINAL_MOUSE_CLICK_DRAG_JS } from './terminal-webview-mouse-click-drag-injected'
 import { TERMINAL_MOUSE_REPORT_CELL_JS } from './terminal-webview-mouse-report-cell-injected'
 import { TERMINAL_WHEEL_SCROLL_JS } from './terminal-webview-wheel-scroll-injected'
@@ -652,7 +654,8 @@ ${TERMINAL_WEBVIEW_THEME_JS}
   }
 
   function pumpWrites(gen) {
-    if (!ready || !term || writesDraining || gen !== terminalGeneration) return;
+    if (!ready || !term || gen !== terminalGeneration) return;
+    if (writesDraining && !releaseStalledWriteDrain()) return;
     var next = nextQueuedWrite();
     if (typeof next !== 'string') {
       if (typeof next === 'function') return next(), pumpWrites(gen);
@@ -662,11 +665,13 @@ ${TERMINAL_WEBVIEW_THEME_JS}
       return;
     }
     writesDraining = true;
+    noteWriteDrainStarted();
     // Why: xterm.write() parses asynchronously. Row adjustment/resizing must
     // wait until replayed SGR attributes have landed in the buffer.
     term.write(next, function() {
       if (gen !== terminalGeneration) return;
       writesDraining = false;
+      noteWriteDrainFinished();
       pumpWrites(gen);
     });
   }
@@ -676,6 +681,7 @@ ${TERMINAL_WEBVIEW_THEME_JS}
     pumpWrites(terminalGeneration);
   }
 
+${TERMINAL_WRITE_DRAIN_RECOVERY_JS}
 ${TERMINAL_WEBGL_RECOVERY_JS}
 
   function init(cols, rows, initialData, nextTheme, nextFontScale, preserveScroll, nextOscLinks) {
@@ -819,17 +825,7 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
     }
   }
 
-  // Diagnostics: proof of life from inside the document itself.
-  //
-  // Without it, "the app received nothing from this WebView" is ambiguous — a
-  // healthy page that simply has nothing to report looks identical to one whose
-  // thread is wedged. A tick that only stops when the page stops has no second
-  // reading.
-  var orcaHeartbeatSeq = 0;
-  setInterval(function() {
-    orcaHeartbeatSeq += 1;
-    notify({ type: 'heartbeat', seq: orcaHeartbeatSeq });
-  }, 2000);
+  ${TERMINAL_HEARTBEAT_JS}
 
   function engineErrorText(err) {
     if (!err) return '';
@@ -982,6 +978,8 @@ ${TERMINAL_WEBGL_RECOVERY_JS}
       }
     } else if (msg.type === 'measure') {
       measureFitDimensions(msg.containerHeight);
+    } else if (msg.type === 'repaint') {
+      forceTerminalRepaint();
     } else if (msg.type === 'reset-zoom') {
       applyFitScale('reset-zoom-msg');
     } else if (msg.type === 'set-theme') {

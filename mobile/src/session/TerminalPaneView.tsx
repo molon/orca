@@ -71,6 +71,8 @@ export function TerminalPaneView({
     >
       <TerminalWebView
         ref={setRef}
+        diagnosticHandle={handle}
+        diagnosticActive={active}
         style={styles.terminalWebView}
         terminalTheme={terminalTheme}
         textScale={textScale}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { View, StyleSheet } from 'react-native'
+import { AppState, View, StyleSheet } from 'react-native'
 import { Stack, useRouter } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
@@ -9,7 +9,10 @@ import { colors } from '../src/theme/mobile-theme'
 import { OrcaLogo } from '../src/components/OrcaLogo'
 import { RpcClientProvider } from '../src/transport/client-context'
 import { getNotificationNavigationTarget } from '../src/notifications/notification-routing'
-import { startTerminalLivenessLog } from '../src/terminal/terminal-liveness-log'
+import {
+  noteTerminalAppState,
+  startTerminalLivenessLog
+} from '../src/terminal/terminal-liveness-log'
 import { useOpenNotificationRoute } from '../src/notifications/use-open-notification-route'
 import { loadHostCatalog } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
@@ -51,6 +54,9 @@ export default function RootLayout() {
   // before that screen exists. Counters and flags only, never terminal content.
   useEffect(() => {
     startTerminalLivenessLog()
+    noteTerminalAppState(AppState.currentState)
+    const sub = AppState.addEventListener('change', (next) => noteTerminalAppState(next))
+    return () => sub.remove()
   }, [])
 
   // Why: route `orca://pair?...` deep links to the confirm screen so
