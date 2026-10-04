@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sessionRouteSource = readFileSync(
-  join(__dirname, '../../app/h/[hostId]/session/[worktreeId].tsx'),
+  join(__dirname, '../session/use-keyboard-background-dismiss.ts'),
   'utf8'
 )
 
@@ -30,7 +30,6 @@ describe('terminal keyboard background dismissal', () => {
   })
 
   it('keeps the ref the resume check reads in step with the keyboard events', () => {
-    expect(sessionRouteSource).toContain('keyboardHeightRef.current = height')
-    expect(sessionRouteSource).toContain('keyboardHeightRef.current = 0')
+    expect(sessionRouteSource).toContain('keyboardHeightRef.current = keyboardHeight')
   })
 })

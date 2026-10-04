@@ -17,6 +17,12 @@ import {
 } from './service-test-harness'
 import { createCanonicalHookTrustFixture } from './service-hook-trust-test-fixtures'
 
+// Why: temp homes exceed sun_path on macOS but not on Linux; keep asserted config bytes host-independent.
+vi.mock('../codex/codex-daemon-socket-path-guard', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  applyCodexDaemonSocketGuard: (config: string) => config
+}))
+
 vi.mock('electron', () => ({
   app: {
     getPath: () => testState.userDataDir
@@ -176,7 +182,7 @@ describe('CodexAccountService config sync', () => {
       '[model_providers.codex-lb]',
       'name = "Codex load balancer"',
       'base_url = "https://codex-lb.example.test/v1"',
-      'env_key = "CODEX_LB_API_KEY"',
+      'env_key = "EXAMPLE_GATEWAY_TOKEN"',
       ''
     ].join('\n')
     writeFileSync(canonicalConfigPath, canonicalConfig, 'utf-8')

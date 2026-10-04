@@ -340,7 +340,13 @@ describe('WslCliInstaller', () => {
     expect(bridge).toContain('$ForwardArgs = @($args[$ForwardArgStart..($args.Count - 1)])')
     expect(bridge).toContain('if ([string]::IsNullOrEmpty($WslCwd))')
     expect(bridge).toContain('$env:ORCA_CLI_CWD = $WslCwd')
-    expect(bridge).toContain('Push-Location -LiteralPath (Split-Path -Parent $OrcaLauncher)')
+    expect(bridge).toContain('$LauncherDirectory = Split-Path -Parent $OrcaLauncher')
+    expect(bridge).toContain('Push-Location -LiteralPath $LauncherDirectory')
+    // Why (#16463): Push-Location moves only the PowerShell provider location.
+    // Without an explicit WorkingDirectory the started app inherits the caller's
+    // Win32 cwd — the user's worktree on \\wsl.localhost — and every wsl.exe
+    // spawn it makes dies with ENOENT once that worktree is removed.
+    expect(bridge).toContain('$StartInfo.WorkingDirectory = $LauncherDirectory')
     expect(bridge).toContain('function ConvertTo-NativeCommandLineArgument')
     expect(bridge).toContain("[void]$Quoted.Append([char]'\\', $BackslashCount * 2 + 1)")
     expect(bridge).toContain('$StartInfo.UseShellExecute = $false')
@@ -783,6 +789,27 @@ describe('WslCliInstaller', () => {
     })
 
     await expect(installer.getStatus()).rejects.toThrow('WSL command timed out')
+  })
+
+  it('reports the distro unreachable rather than "not on PATH" without the login PATH', async () => {
+    // The `case ":$PATH:"` probe answers from the distro default PATH when the
+    // login PATH never resolved, and ~/.local/bin is never on that. Settings
+    // would then state as fact that the CLI is not on PATH while the user's
+    // own terminal finds it -- #14288 turning into a confident wrong verdict.
+    runWslProcessMock.mockResolvedValue({
+      environmentResolved: false,
+      code: 0,
+      stdout: 'no',
+      stderr: '',
+      timedOut: false
+    })
+    const installer = new WslCliInstaller({
+      platform: 'win32',
+      distro: 'Ubuntu',
+      hostInstaller: { getStatus: async () => makeHostStatus() }
+    })
+
+    await expect(installer.getStatus()).rejects.toThrow('Could not reach the WSL distro')
   })
 
   it('refuses to remove an old managed launcher when the bridge path is user-owned', async () => {

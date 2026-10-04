@@ -42,13 +42,14 @@ type TerminalLivePendingInputFlush = {
     handle: string,
     fieldText: string,
     report?: TerminalLiveFieldReport
-  ) => void
+  ) => Promise<boolean>
   readonly adoptLiveInputLine: (handle: string, text: string) => void
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputText: (expectedHandle: string | null) => Promise<boolean>
   readonly parkLiveInputLine: () => void
   readonly readLiveInputLine: (handle: string) => string
   readonly heldLiveInputTextRef: RefObject<string>
+  readonly liveInputComposingRef: RefObject<boolean | undefined>
   readonly mirroredFieldTextRef: RefObject<string>
   readonly pendingLiveInputHandleRef: RefObject<string | null>
   readonly waitForPendingLiveInputFlush: () => Promise<boolean>
@@ -64,6 +65,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
   const heldCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingLiveInputFlushRef = useRef(createTerminalLivePendingFlushState())
   const heldLiveInputTextRef = useRef('')
+  const liveInputComposingRef = useRef<boolean | undefined>(undefined)
   /**
    * What the field last reported, minus any preedit tail.
    *
@@ -94,6 +96,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     if (handle) {
       forgetTerminalLiveInputLine(handle)
     }
+    liveInputComposingRef.current = undefined
     pendingLiveInputHandleRef.current = null
     setLiveInputCapture('')
   }, [clearHeldCommitTimer, setLiveInputCapture])
@@ -103,12 +106,13 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
   const parkLiveInputLine = useCallback(() => {
     clearHeldCommitTimer()
     cancelTerminalLivePendingFlush(pendingLiveInputFlushRef.current)
+    liveInputComposingRef.current = undefined
     pendingLiveInputHandleRef.current = null
     setLiveInputCapture('')
   }, [clearHeldCommitTimer, setLiveInputCapture])
 
   /** What this terminal's prompt is still holding, for the field to show again. */
-  const readLiveInputLine = useCallback(readTerminalLiveInputLine, [])
+  const readLiveInputLine = readTerminalLiveInputLine
 
   const adoptLiveInputLine = useCallback(
     (handle: string, text: string): void => {
@@ -167,6 +171,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
       })
       mirroredFieldTextRef.current = step.nextSentText
       heldLiveInputTextRef.current = step.heldText
+      liveInputComposingRef.current = report?.composing
 
       // The field outlives the line, so an edit near its start can ask for more
       // erases than the line has characters. Spend only what is there.
@@ -222,9 +227,8 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
   }, [runMirrorStep])
 
   const applyLiveInputMirror = useCallback(
-    (handle: string, fieldText: string, report?: TerminalLiveFieldReport): void => {
-      void runMirrorStep(handle, fieldText, false, report)
-    },
+    (handle: string, fieldText: string, report?: TerminalLiveFieldReport): Promise<boolean> =>
+      runMirrorStep(handle, fieldText, false, report),
     [runMirrorStep]
   )
 
@@ -260,6 +264,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
         heldCommitTimerRef.current = null
       }
       heldLiveInputTextRef.current = ''
+      liveInputComposingRef.current = undefined
       mirroredFieldTextRef.current = ''
       // Deliberately not clearing the remembered lines: unmount is the route
       // going away, not the terminals, and their prompts still hold this text.
@@ -276,6 +281,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     parkLiveInputLine,
     readLiveInputLine,
     heldLiveInputTextRef,
+    liveInputComposingRef,
     mirroredFieldTextRef,
     pendingLiveInputHandleRef,
     waitForPendingLiveInputFlush

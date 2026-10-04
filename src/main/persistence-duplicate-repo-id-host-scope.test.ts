@@ -1,3 +1,4 @@
+import { closeTestStores, createSqliteTestStore } from './persistence-test-harness'
 /**
  * The same repo id may be registered on two execution hosts (see `removeProjectForHost`).
  * Every deletion that resolves a *row* must therefore delete only that row: `removeProject`
@@ -12,6 +13,7 @@ import type { Project, ProjectHostSetup } from '../shared/project-types'
 import type { Repo } from '../shared/repo-types'
 import { getDefaultPersistedState } from '../shared/constants'
 import { toRuntimeExecutionHostId } from '../shared/execution-host'
+import { installFakeAppEnvironment } from '../../config/scripts/vitest-host-ports-setup'
 
 const testState = { dir: '' }
 
@@ -52,8 +54,11 @@ async function createStoreFromState(state: Record<string, unknown>) {
   )
   vi.resetModules()
   const { Store, initDataPath } = await import('./persistence')
+  // Why here: userData resolves through AppEnvironment, and this must point at this
+  // file's temp dir rather than the global fake's shared one, after resetModules.
+  installFakeAppEnvironment({ getPath: () => testState.dir })
   initDataPath()
-  return new Store()
+  return createSqliteTestStore(Store, { dataFile: join(testState.dir, 'orca-data.json') })
 }
 
 function createStoreWithDuplicateRepoId() {
@@ -94,7 +99,8 @@ beforeEach(() => {
   testState.dir = mkdtempSync(join(tmpdir(), 'orca-dup-repo-id-'))
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await closeTestStores()
   rmSync(testState.dir, { recursive: true, force: true })
 })
 

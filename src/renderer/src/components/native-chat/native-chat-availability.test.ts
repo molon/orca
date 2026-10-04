@@ -117,13 +117,13 @@ describe('canToggleNativeChat', () => {
     ).toBe(true)
   })
 
-  it('rejects an unsupported agent detected live (Gemini)', () => {
+  it.each(['gemini'] as const)('rejects unsupported agent %s detected live', (agent) => {
     expect(
       canToggleNativeChat({
         experimentalNativeChatEnabled: true,
         contentType: 'terminal',
         launchAgent: null,
-        detectedAgent: 'gemini'
+        detectedAgent: agent
       })
     ).toBe(false)
   })

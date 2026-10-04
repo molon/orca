@@ -47,12 +47,12 @@ describe('decideInitialAgentTabViewMode', () => {
     ).toBeUndefined()
   })
 
-  it('returns undefined for unsupported agents', () => {
+  it.each(['gemini'] as const)('keeps unsupported agent %s in terminal view', (agent) => {
     expect(
       decideInitialAgentTabViewMode({
         experimentalNativeChat: true,
         openAgentTabsInChatByDefault: true,
-        agent: 'gemini'
+        agent
       })
     ).toBeUndefined()
   })

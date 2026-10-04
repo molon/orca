@@ -87,6 +87,10 @@ async function probeGuestEnvironment(
   const result = await runProcess({
     program: resolveWslExecutablePath(),
     args: buildWslExecArgs(distro, ['sh', '-c', captured.command]),
+    // The runner sets this for every command it launches (#9010); the probe
+    // spawns wsl.exe itself, so without it wsl.exe's own errors arrive UTF-16LE
+    // and the NUL-separated payload below is read through NUL-riddled text.
+    env: { ...process.env, WSL_UTF8: '1' },
     timeoutMs: Math.min(PROBE_TIMEOUT_MS, budgetMs),
     maxOutputBytes: PROBE_MAX_OUTPUT_BYTES
   })
@@ -121,6 +125,10 @@ export function getWslGuestEnvironment(
   budgetMs = PROBE_TIMEOUT_MS
 ): Promise<WslGuestEnvironment | null> {
   const key = cacheKey(distro)
+  const cached = resolved.get(key)
+  if (cached) {
+    return Promise.resolve(cached)
+  }
   const retry = retryAfter.get(key)
   if (retry !== undefined && Date.now() >= retry) {
     inFlight.delete(key)
@@ -150,13 +158,14 @@ export function getWslGuestEnvironment(
     // Why race: joining an in-flight probe used to mean waiting out the
     // *starter's* budget, so a joiner could reach its own command with 1ms --
     // the exact hazard the budget plumbing was added to remove.
+    let timer: ReturnType<typeof setTimeout>
     return Promise.race([
       existing,
       new Promise<null>((resolve) => {
-        const timer = setTimeout(() => resolve(null), budgetMs)
+        timer = setTimeout(() => resolve(null), budgetMs)
         timer.unref?.()
       })
-    ])
+    ]).finally(() => clearTimeout(timer))
   }
   // Store before awaiting so a burst collapses into one probe.
   // Why catch: runProcess REJECTS when the child cannot be started (ENOENT on a

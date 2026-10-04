@@ -40,6 +40,9 @@ vi.mock('./worktree-symlinks', async () =>
   (await import('./worktrees-test-module-mocks')).worktreeSymlinksModuleMock()
 )
 vi.mock('./ssh', async () => (await import('./worktrees-test-module-mocks')).sshModuleMock())
+vi.mock('../ssh/ssh-target-registry', async () =>
+  (await import('./worktrees-test-module-mocks')).sshTargetRegistryModuleMock()
+)
 vi.mock('../hooks', async () => (await import('./worktrees-test-module-mocks')).hooksModuleMock())
 vi.mock('../setup-runner-script-text', async (importOriginal) =>
   (await import('./worktrees-test-module-mocks')).setupRunnerScriptTextModuleMock(
@@ -104,8 +107,14 @@ describe('registerWorktreeHandlers', () => {
     const setupError = new Error('sparse init failed')
     const provider = {
       exec: vi.fn().mockImplementation(async (args: string[]) => {
+        if (args[0] === 'for-each-ref' && args.includes('refs/heads/')) {
+          return { stdout: '', stderr: '' }
+        }
         if (args[0] === 'remote') {
           return { stdout: 'origin\n', stderr: '' }
+        }
+        if (args[0] === 'show-ref') {
+          throw Object.assign(new Error('ref not found'), { code: 1 })
         }
         if (args[0] === 'sparse-checkout' && args[1] === 'init') {
           throw setupError
@@ -162,8 +171,14 @@ describe('registerWorktreeHandlers', () => {
     }
     const provider = {
       exec: vi.fn().mockImplementation(async (args: string[]) => {
+        if (args[0] === 'for-each-ref' && args.includes('refs/heads/')) {
+          return { stdout: '', stderr: '' }
+        }
         if (args[0] === 'remote') {
           return { stdout: 'origin\n', stderr: '' }
+        }
+        if (args[0] === 'show-ref') {
+          throw Object.assign(new Error('ref not found'), { code: 1 })
         }
         if (args[0] === 'fetch') {
           throw new Error('network unavailable')
@@ -217,11 +232,17 @@ describe('registerWorktreeHandlers', () => {
     }
     const provider = {
       exec: vi.fn().mockImplementation(async (args: string[]) => {
+        if (args[0] === 'for-each-ref' && args.includes('refs/heads/')) {
+          return { stdout: '', stderr: '' }
+        }
         if (args[0] === 'remote') {
           return { stdout: 'origin\n', stderr: '' }
         }
         if (args[0] === 'symbolic-ref') {
           return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
+        }
+        if (args[0] === 'show-ref') {
+          throw Object.assign(new Error('ref not found'), { code: 1 })
         }
         if (args[0] === 'rev-parse' && args.includes('refs/remotes/origin/master^{commit}')) {
           return { stdout: '', stderr: '' }
@@ -289,6 +310,9 @@ describe('registerWorktreeHandlers', () => {
     let repoRootRegistered = false
     const provider = {
       exec: vi.fn().mockImplementation(async (args: string[]) => {
+        if (args[0] === 'for-each-ref' && args.includes('refs/heads/')) {
+          return { stdout: '', stderr: '' }
+        }
         if (args[0] === 'config') {
           return { stdout: '', stderr: '' }
         }
@@ -297,6 +321,9 @@ describe('registerWorktreeHandlers', () => {
         }
         if (args[0] === 'symbolic-ref') {
           return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
+        }
+        if (args[0] === 'show-ref') {
+          throw Object.assign(new Error('ref not found'), { code: 1 })
         }
         if (args[0] === 'rev-parse' && args.includes('refs/heads/develop^{commit}')) {
           return { stdout: repoRootRegistered ? 'develop-sha\n' : '', stderr: '' }
@@ -361,6 +388,9 @@ describe('registerWorktreeHandlers', () => {
     let repoRootRegistered = false
     const provider = {
       exec: vi.fn().mockImplementation(async (args: string[]) => {
+        if (args[0] === 'for-each-ref' && args.includes('refs/heads/')) {
+          return { stdout: '', stderr: '' }
+        }
         if (args[0] === 'config') {
           return { stdout: '', stderr: '' }
         }
@@ -369,6 +399,9 @@ describe('registerWorktreeHandlers', () => {
         }
         if (args[0] === 'symbolic-ref') {
           return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
+        }
+        if (args[0] === 'show-ref') {
+          throw Object.assign(new Error('ref not found'), { code: 1 })
         }
         if (args[0] === 'rev-parse' && args.includes('refs/remotes/origin/main')) {
           return { stdout: 'main-sha\n', stderr: '' }

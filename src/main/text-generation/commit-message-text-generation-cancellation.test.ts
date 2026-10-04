@@ -10,7 +10,8 @@ import {
 } from './commit-message-text-generation'
 import {
   createChildTerminationExpectation,
-  createMockDiscoveryChild
+  createMockDiscoveryChild,
+  withPlatform
 } from './commit-message-text-generation-test-harness'
 
 const { terminateWindowsProcessTreeMock } = vi.hoisted(() => ({
@@ -40,6 +41,72 @@ beforeEach(() => {
 })
 
 describe('generateCommitMessageFromContext', () => {
+  it('fails clearly before spawning when a jcode argv prompt exceeds the Windows command line', async () => {
+    await withPlatform('win32', async () => {
+      const pending = generateCommitMessageFromContext(
+        {
+          branch: 'main',
+          stagedSummary: 'M\tREADME.md',
+          stagedPatch: `+${'x'.repeat(40_000)}`
+        },
+        {
+          agentId: 'jcode',
+          model: 'default'
+        },
+        {
+          kind: 'local',
+          cwd: '/repo',
+          env: { ...process.env }
+        }
+      )
+
+      await expect(pending).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining('too large for the Windows command line')
+      })
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('fails clearly before spawning when a jcode argv prompt exceeds the Linux single-argument cap', async () => {
+    await withPlatform('linux', async () => {
+      const pending = generateCommitMessageFromContext(
+        {
+          branch: 'main',
+          stagedSummary: 'M\tREADME.md',
+          // Why past 120 KiB and not the Windows 30k: Linux fails on ONE argument
+          // over MAX_ARG_STRLEN, which is far larger than the Windows line budget.
+          stagedPatch: `+${'x'.repeat(140_000)}`
+        },
+        { agentId: 'jcode', model: 'default' },
+        { kind: 'local', cwd: '/repo', env: { ...process.env } }
+      )
+
+      await expect(pending).resolves.toMatchObject({
+        success: false,
+        error: expect.stringContaining('single command-line argument')
+      })
+      expect(spawnMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('still spawns on Linux for a prompt that only Windows would refuse', async () => {
+    await withPlatform('linux', async () => {
+      // 40k chars trips the Windows line budget but is far under the Linux per-arg cap,
+      // so the guard must not have become a lowest-common-denominator limit.
+      await generateCommitMessageFromContext(
+        {
+          branch: 'main',
+          stagedSummary: 'M\tREADME.md',
+          stagedPatch: `+${'x'.repeat(40_000)}`
+        },
+        { agentId: 'jcode', model: 'default' },
+        { kind: 'local', cwd: '/repo', env: { ...process.env } }
+      )
+      expect(spawnMock).toHaveBeenCalled()
+    })
+  })
+
   it('keeps local commit-message and pull-request cancellation lanes separate', async () => {
     const children: {
       pid: number
@@ -101,7 +168,7 @@ describe('generateCommitMessageFromContext', () => {
 
     cancelGenerateCommitMessageLocal('/repo')
 
-    expectChildTerminated(children[0]!)
+    await expectChildTerminated(children[0]!)
     expect(children[1]?.kill).not.toHaveBeenCalled()
 
     children[0]?.listeners.get('close')?.(null)
@@ -192,7 +259,7 @@ describe('generateCommitMessageFromContext', () => {
     cancelGeneratePullRequestFieldsLocal('/repo')
 
     expect(children[0]?.kill).not.toHaveBeenCalled()
-    expectChildTerminated(children[1]!)
+    await expectChildTerminated(children[1]!)
 
     const commitStdout = children[0]?.listeners.get('stdout:data')
     commitStdout?.(Buffer.from('Update README\n'))
@@ -250,7 +317,7 @@ describe('generateCommitMessageFromContext', () => {
     cancelGeneratePullRequestFieldsLocal('/repo')
     listeners.get('close')?.(null)
 
-    expectChildTerminated(child)
+    await expectChildTerminated(child)
     await expect(pullRequest).resolves.toEqual({
       success: false,
       error: 'Generation canceled.',
@@ -306,7 +373,7 @@ describe('generateCommitMessageFromContext', () => {
       )
 
       cancelGenerateCommitMessageLocal('/repo')
-      expectChildTerminated(child)
+      await expectChildTerminated(child)
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
@@ -344,7 +411,7 @@ describe('generateCommitMessageFromContext', () => {
       error: 'Generation canceled.',
       canceled: true
     })
-    expectChildTerminated(firstChild)
+    await expectChildTerminated(firstChild)
 
     const second = generateCommitMessageFromContext(context, params, {
       kind: 'local',
@@ -377,7 +444,7 @@ describe('generateCommitMessageFromContext', () => {
     await vi.waitFor(() => expect(spawnMock).toHaveBeenCalledTimes(1))
     cancelGenerateCommitMessageLocal('/descendant-repo')
     await expect(first).resolves.toMatchObject({ canceled: true })
-    expectChildTerminated(firstChild)
+    await expectChildTerminated(firstChild)
 
     // SIGKILL reaches the codex process but not a grandchild that inherited its
     // stdout, so 'exit' arrives and 'close' never does.

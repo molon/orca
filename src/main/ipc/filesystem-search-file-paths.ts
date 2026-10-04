@@ -1,3 +1,5 @@
+import { getQuickOpenRgOutputMode } from '../../shared/quick-open-ripgrep-output-mode'
+import { RipgrepFilenameDecoder } from '../../shared/ripgrep-filename-decoder'
 import { sep } from 'node:path'
 import type { Store } from '../persistence'
 import { fileListingCancellationError } from '../../shared/file-listing-cancellation'
@@ -6,23 +8,27 @@ import {
   buildRgArgsForQuickOpen,
   normalizeQuickOpenRgLine,
   shouldExcludeQuickOpenRelPath,
-  shouldIncludeQuickOpenPath,
-  type RgOutputMode
+  shouldIncludeQuickOpenPath
 } from '../../shared/quick-open-filter'
 import { isQuickOpenQueryTooLarge, QuickOpenPathRanker } from '../../shared/quick-open-path-search'
 import {
   absorbPendingRipgrepSpawnError,
   isRipgrepUnavailableExit,
+  classifySynchronousRipgrepSpawnFailure,
+  isRipgrepMissingCwdExit,
+  isRipgrepSpawnCwdUsable,
+  isTransientRipgrepSpawnError,
   killSpawnedRipgrepProcess,
+  ripgrepMissingCwdError,
+  RipgrepLaunchFailureError,
   RipgrepUnavailableError
 } from '../../shared/ripgrep-process-availability'
-import { wslAwareSpawn } from '../git/runner'
 import { parseWslPath, toWindowsWslPath } from '../wsl'
-import { checkRgAvailable } from './rg-availability'
 import { resolveAuthorizedPath } from './filesystem-auth'
 import { getLocalGitOptionsForRegisteredWorktree } from './local-worktree-runtime-options'
 import { QuickOpenSubprocessPathAccumulator } from '../../shared/quick-open-listing-limits'
-import { buildRipgrepRequiredMessage } from '../../shared/quick-open-install-rg'
+import { bundledRipgrepUnavailableError } from '../ripgrep/bundled-ripgrep-path'
+import { spawnBundledRipgrep } from '../ripgrep/bundled-ripgrep-spawn'
 
 export type QuickOpenFilePathSearchResult = {
   paths: string[]
@@ -51,24 +57,15 @@ export async function searchQuickOpenFilePaths(
   )
   const wslDistroForOutput = parseWslPath(authorizedRootPath)?.distro ?? localGitOptions.wslDistro
 
-  const fallback = async (): Promise<QuickOpenFilePathSearchResult> => {
-    throw new Error(await buildRipgrepRequiredMessage())
-  }
-  if (
-    wslDistroForOutput &&
-    !(await checkRgAvailable(authorizedRootPath, localGitOptions.wslDistro))
-  ) {
-    return fallback()
-  }
-
   const excludePathPrefixes = buildExcludePathPrefixes(authorizedRootPath, args.excludePaths)
   const { ignoredPass } = buildRgArgsForQuickOpen({
     searchRoot: '.',
     excludePathPrefixes,
     forceSlashSeparator: sep === '\\'
   })
-  const ranker = new QuickOpenPathRanker(args.query, args.limit)
-  try {
+  // Fresh ranker per attempt so a retry cannot double-count paths from the aborted scan.
+  const scanOnce = async (): Promise<QuickOpenFilePathSearchResult> => {
+    const ranker = new QuickOpenPathRanker(args.query, args.limit)
     await scanRipgrepPaths({
       args: ignoredPass,
       authorizedRootPath,
@@ -78,14 +75,27 @@ export async function searchQuickOpenFilePaths(
       signal: args.signal,
       wslDistroForOutput
     })
-  } catch (error) {
-    if (error instanceof RipgrepUnavailableError) {
-      return fallback()
-    }
-    throw error
+    const result = ranker.result()
+    return { ...result, truncated: result.totalCount > args.limit }
   }
-  const result = ranker.result()
-  return { ...result, truncated: result.totalCount > args.limit }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await scanOnce()
+    } catch (error) {
+      if (error instanceof RipgrepUnavailableError) {
+        throw bundledRipgrepUnavailableError()
+      }
+      // Why: a supersede that lands after the scan rejected still owes the caller a cancellation.
+      if (args.signal?.aborted) {
+        throw fileListingCancellationError(args.signal)
+      }
+      // Why: one-off fork/exec pressure should not blank Quick Open until the query changes.
+      if (!(error instanceof RipgrepLaunchFailureError) || attempt > 0) {
+        throw error
+      }
+    }
+  }
+  throw new Error('unreachable Quick Open retry state')
 }
 
 function scanRipgrepPaths(args: {
@@ -101,16 +111,32 @@ function scanRipgrepPaths(args: {
     return Promise.reject(fileListingCancellationError(args.signal))
   }
   return new Promise((resolve, reject) => {
-    const pathAccumulator = new QuickOpenSubprocessPathAccumulator(0x0a)
+    const filenameDecoder = new RipgrepFilenameDecoder((error) => {
+      killSpawnedRipgrepProcess(child)
+      finish(error)
+    }, Boolean(args.wslDistroForOutput))
+    const pathAccumulator = new QuickOpenSubprocessPathAccumulator(0)
     let done = false
     let parseablePathCount = 0
     let processErrorObserved = false
     let unavailableExitObserved = false
-    const child = wslAwareSpawn('rg', args.args, {
-      cwd: args.authorizedRootPath,
-      ...(args.localGitOptions.wslDistro ? { wslDistro: args.localGitOptions.wslDistro } : {}),
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
+    let child: ReturnType<typeof spawnBundledRipgrep>
+    try {
+      child = spawnBundledRipgrep(args.args, {
+        cwd: args.authorizedRootPath,
+        wslDistro: args.localGitOptions.wslDistro,
+        wslDistroForOutput: args.wslDistroForOutput,
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+    } catch (error) {
+      // Why route through the classifier: a sync throw skips the 'error' handler, and ENOTDIR --
+      // a search root that is a file -- should read the same here as it does there.
+      void classifySynchronousRipgrepSpawnFailure(error, args.authorizedRootPath).then(
+        reject,
+        reject
+      )
+      return
+    }
     let timer: ReturnType<typeof setTimeout>
 
     const processLine = (rawLine: string): void => {
@@ -120,7 +146,7 @@ function scanRipgrepPaths(args: {
           : rawLine
       const relPath = normalizeQuickOpenRgLine(
         translated,
-        getOutputMode(rawLine, translated, args.authorizedRootPath)
+        getQuickOpenRgOutputMode(rawLine, translated, args.authorizedRootPath)
       )
       if (relPath === null) {
         return
@@ -135,8 +161,8 @@ function scanRipgrepPaths(args: {
     }
     const cleanup = (): void => {
       clearTimeout(timer)
-      child.stdout!.off('data', handleStdoutData)
-      child.stderr!.off('data', handleStderrData)
+      child.stdout?.off('data', handleStdoutData)
+      child.stderr?.off('data', handleStderrData)
       child.off('error', handleError)
       child.off('close', handleClose)
       args.signal?.removeEventListener('abort', handleAbort)
@@ -157,27 +183,59 @@ function scanRipgrepPaths(args: {
         resolve()
       }
     }
-    const handleStdoutData = (chunk: string): void => {
-      pathAccumulator.push(chunk, (path) => {
+    const handleStdoutData = (chunk: Buffer | string): void => {
+      const decoded = filenameDecoder.decode(chunk)
+      if (decoded === null) {
+        return
+      }
+      const result = pathAccumulator.push(decoded, (path) => {
         processLine(path)
         return true
       })
+      if (result === 'path-too-large') {
+        killSpawnedRipgrepProcess(child)
+        finish(new Error('Quick Open file path exceeds the listing limit'))
+      }
     }
     const handleStderrData = (): void => {
       /* drain */
     }
-    const handleError = (): void => {
+    const handleError = (error: NodeJS.ErrnoException): void => {
       processErrorObserved = true
-      finish(
-        isRipgrepUnavailableExit(child, null, null)
-          ? new RipgrepUnavailableError()
-          : new Error('rg failed to start')
-      )
+      if (isTransientRipgrepSpawnError(error)) {
+        finish(new RipgrepLaunchFailureError(`rg failed to start (${error.code})`))
+        return
+      }
+      if (!isRipgrepUnavailableExit(child, null, null)) {
+        finish(new Error(`rg failed to start${error.code ? ` (${error.code})` : ''}`))
+        return
+      }
+      // Why the cwd check: spawn reports a missing cwd as ENOENT too, and blaming the binary
+      // for it tells the user to reinstall Orca over a workspace that simply moved.
+      // Why detach close first: a failed spawn emits error THEN close(code < 0), and close settles
+      // synchronously, so this probe would otherwise race it on a sub-millisecond margin -- two
+      // measurements disagreed on which wins. Detaching makes the verdict deterministic.
+      child.off('close', handleClose)
+      // Why catch: a failed probe must not strand the search; fall back to the prior verdict.
+      void isRipgrepSpawnCwdUsable(args.authorizedRootPath)
+        .catch(() => true)
+        .then((usable) => {
+          finish(
+            usable ? new RipgrepUnavailableError() : ripgrepMissingCwdError(args.authorizedRootPath)
+          )
+        })
     }
     const handleClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      // Why before the unavailable check: classifyNativeLauncherExit treats any code above 2 as a
+      // broken install, and this code is 97 -- so checking second makes this branch dead.
+      if (isRipgrepMissingCwdExit(code)) {
+        pathAccumulator.clear()
+        finish(ripgrepMissingCwdError(args.authorizedRootPath))
+        return
+      }
       if (
         isRipgrepUnavailableExit(child, code, signal, {
-          classifyNativeLauncherExit: !args.wslDistroForOutput
+          classifyNativeLauncherExit: true
         })
       ) {
         unavailableExitObserved = true
@@ -186,6 +244,9 @@ function scanRipgrepPaths(args: {
       }
       if (signal) {
         finish(new Error(`rg killed by ${signal}`))
+        return
+      }
+      if (!filenameDecoder.finish()) {
         return
       }
       const trailingPath = pathAccumulator.finish()
@@ -204,9 +265,8 @@ function scanRipgrepPaths(args: {
       finish(fileListingCancellationError(args.signal))
     }
 
-    child.stdout!.setEncoding('utf-8')
-    child.stdout!.on('data', handleStdoutData)
-    child.stderr!.on('data', handleStderrData)
+    child.stdout?.on('data', handleStdoutData)
+    child.stderr?.on('data', handleStderrData)
     child.once('error', handleError)
     child.once('close', handleClose)
     args.signal?.addEventListener('abort', handleAbort, { once: true })
@@ -219,13 +279,4 @@ function scanRipgrepPaths(args: {
       handleAbort()
     }
   })
-}
-
-function getOutputMode(rawLine: string, translatedLine: string, rootPath: string): RgOutputMode {
-  return translatedLine !== rawLine ||
-    rawLine.startsWith('/') ||
-    /^[A-Za-z]:[\\/]/.test(rawLine) ||
-    rawLine.startsWith('\\\\')
-    ? { kind: 'absolute', rootPath }
-    : { kind: 'cwd-relative' }
 }

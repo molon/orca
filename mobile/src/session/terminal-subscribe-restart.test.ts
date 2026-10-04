@@ -66,14 +66,14 @@ describe('terminal stream restart', () => {
 
   it('is wired into the subscription listener', () => {
     const screen = readFileSync(
-      new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
+      new URL('./use-mobile-session-terminal-subscription.ts', import.meta.url),
       'utf8'
     )
     const ended = screen.slice(
       screen.indexOf("if (data.type === 'end' || data.type === 'error') {"),
       screen.indexOf("if (data.type === 'subscribed') {")
     )
-    expect(ended).toContain('planTerminalStreamRestart(handle, seq')
+    expect(ended).toContain('.restartIfUnstarted(handle, seq')
     expect(ended).toContain('subscribeToTerminalRef.current')
     expect(screen).toContain('noteTerminalSubscribeSucceeded(handle, seq)')
   })

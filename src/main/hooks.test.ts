@@ -1,6 +1,6 @@
 import type * as GitRunner from './git/runner'
 
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeHookTestRepo } from './hooks-test-fixtures'
 
 // Mock fs used by loadHooks
@@ -13,17 +13,17 @@ vi.mock('fs', () => ({
   chmodSync: vi.fn()
 }))
 
-const { execMock, runWslProcessMock, gitExecFileSyncMock } = vi.hoisted(() => ({
-  execMock: vi.fn(),
+const { spawnMock, runWslProcessMock, gitExecFileSyncMock } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
   runWslProcessMock: vi.fn(),
   gitExecFileSyncMock: vi.fn()
 }))
 
 vi.mock('child_process', () => ({
-  exec: execMock,
-  execFileSync: vi.fn(),
-  // runner.ts imports spawn from child_process transitively.
-  spawn: vi.fn()
+  // One `spawn` for both: hooks.ts runs the script through it, and runner.ts imports it
+  // transitively. A second key here silently shadowed the first.
+  spawn: spawnMock,
+  execFileSync: vi.fn()
 }))
 
 vi.mock('./wsl/wsl-runner', () => ({
@@ -35,6 +35,35 @@ vi.mock('./git/runner', async () => ({
   gitExecFileSync: gitExecFileSyncMock
 }))
 
+/** Minimal ChildProcess stand-in: hooks.ts reads the streams and waits for close/error. */
+function fakeChild(exit: { code?: number | null; signal?: NodeJS.Signals | null } = { code: 0 }) {
+  const listeners: Record<string, ((...args: unknown[]) => void)[]> = {}
+  const stream = { setEncoding: () => {}, on: () => {} }
+  queueMicrotask(() => {
+    for (const fn of listeners.close ?? []) {
+      fn(exit.code ?? null, exit.signal ?? null)
+    }
+  })
+  return {
+    pid: 4242,
+    stdout: stream,
+    stderr: stream,
+    exitCode: null,
+    signalCode: null,
+    kill: () => true,
+    on(event: string, fn: (...args: unknown[]) => void) {
+      ;(listeners[event] ??= []).push(fn)
+      return this
+    }
+  }
+}
+
+beforeEach(() => {
+  // Clear as well as re-arm: these assertions are order-sensitive and calls otherwise accumulate.
+  spawnMock.mockClear()
+  spawnMock.mockImplementation(() => fakeChild())
+})
+
 describe('runHook', () => {
   const makeRepo = (hookSettings?: {
     mode?: 'auto' | 'override'
@@ -43,10 +72,7 @@ describe('runHook', () => {
   }) => makeHookTestRepo(hookSettings)
 
   it('uses the Windows command shell when running hooks', async () => {
-    execMock.mockImplementation((_script, _options, callback) => {
-      callback?.(null, '', '')
-      return {} as never
-    })
+    spawnMock.mockImplementation(() => fakeChild())
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -66,13 +92,12 @@ describe('runHook', () => {
       const result = await runHook('setup', 'C:\\repo\\worktree', makeRepo())
 
       expect(result).toEqual({ success: true, output: '' })
-      expect(execMock).toHaveBeenCalledWith(
+      expect(spawnMock).toHaveBeenCalledWith(
         'echo hello',
         expect.objectContaining({
           cwd: 'C:\\repo\\worktree',
           shell: 'C:\\Windows\\System32\\cmd.exe'
-        }),
-        expect.any(Function)
+        })
       )
     } finally {
       Object.defineProperty(process, 'platform', {
@@ -87,11 +112,50 @@ describe('runHook', () => {
     }
   })
 
-  it('keeps bash as the hook shell on non-Windows platforms', async () => {
-    execMock.mockImplementation((_script, _options, callback) => {
-      callback?.(null, '', '')
-      return {} as never
+  it('does not run setup scripts with a half-activated conda env', async () => {
+    // Why: setup scripts source conda exactly like a shell rc does, so the
+    // orphaned CONDA_SHLVL sentinel surfaces as an opaque hook failure (#14195).
+    let capturedEnv: Record<string, string> | undefined
+    spawnMock.mockImplementation((_script, options) => {
+      capturedEnv = (options as { env: Record<string, string> }).env
+      return fakeChild()
     })
+
+    const fs = await import('node:fs')
+    vi.mocked(fs.existsSync).mockReturnValue(true)
+    vi.mocked(fs.readFileSync).mockReturnValue('scripts:\n  setup: |\n    echo hello\n')
+
+    const saved = {
+      CONDA_SHLVL: process.env.CONDA_SHLVL,
+      CONDA_PREFIX: process.env.CONDA_PREFIX,
+      CONDA_DEFAULT_ENV: process.env.CONDA_DEFAULT_ENV,
+      CONDA_EXE: process.env.CONDA_EXE
+    }
+    delete process.env.CONDA_PREFIX
+    process.env.CONDA_SHLVL = '1'
+    process.env.CONDA_DEFAULT_ENV = 'base'
+    process.env.CONDA_EXE = '/opt/miniconda3/bin/conda'
+
+    try {
+      const { runHook } = await import('./hooks')
+      await runHook('setup', '/repo/worktree', makeRepo())
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+    }
+
+    expect(capturedEnv?.CONDA_SHLVL).toBeUndefined()
+    expect(capturedEnv?.CONDA_DEFAULT_ENV).toBeUndefined()
+    expect(capturedEnv?.CONDA_EXE).toBe('/opt/miniconda3/bin/conda')
+  })
+
+  it('keeps bash as the hook shell on non-Windows platforms', async () => {
+    spawnMock.mockImplementation(() => fakeChild())
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -111,7 +175,7 @@ describe('runHook', () => {
       const result = await runHook('setup', '/repo/worktree', makeRepo())
 
       expect(result).toEqual({ success: true, output: '' })
-      expect(execMock).toHaveBeenCalledWith(
+      expect(spawnMock).toHaveBeenCalledWith(
         'echo hello',
         expect.objectContaining({
           cwd: '/repo/worktree',
@@ -122,8 +186,7 @@ describe('runHook', () => {
             GIT_TERMINAL_PROMPT: '0',
             GCM_INTERACTIVE: 'never'
           })
-        }),
-        expect.any(Function)
+        })
       )
     } finally {
       Object.defineProperty(process, 'platform', {
@@ -139,9 +202,16 @@ describe('runHook', () => {
   })
 
   it('runs WSL hooks through runWslProcess and translates env paths to Linux', async () => {
-    execMock.mockReset()
+    spawnMock.mockReset()
+    spawnMock.mockImplementation(() => fakeChild())
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: 0, stdout: '', stderr: '', timedOut: false })
+    runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
+      code: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false
+    })
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -164,7 +234,7 @@ describe('runHook', () => {
       expect(runWslProcessMock).toHaveBeenCalledWith(
         expect.objectContaining({
           distro: 'Ubuntu',
-          lane: 'probe',
+          loginPath: 'preferred',
           script: 'echo hello',
           cwd: '/home/jin/feature',
           // #7652 regression: the unattended WSL hook branch must carry the
@@ -179,7 +249,7 @@ describe('runHook', () => {
           })
         })
       )
-      expect(execMock).not.toHaveBeenCalled()
+      expect(spawnMock).not.toHaveBeenCalled()
     } finally {
       Object.defineProperty(process, 'platform', {
         configurable: true,
@@ -189,9 +259,16 @@ describe('runHook', () => {
   })
 
   it('runs Windows-path hooks through WSL when the project runtime targets WSL', async () => {
-    execMock.mockReset()
+    spawnMock.mockReset()
+    spawnMock.mockImplementation(() => fakeChild())
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: 0, stdout: '', stderr: '', timedOut: false })
+    runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
+      code: 0,
+      stdout: '',
+      stderr: '',
+      timedOut: false
+    })
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -220,7 +297,7 @@ describe('runHook', () => {
       expect(runWslProcessMock).toHaveBeenCalledWith(
         expect.objectContaining({
           distro: 'Ubuntu',
-          lane: 'probe',
+          loginPath: 'preferred',
           script: 'echo hello',
           cwd: '/mnt/c/Users/jinwo/git/orca-feature',
           env: expect.objectContaining({
@@ -231,7 +308,7 @@ describe('runHook', () => {
           })
         })
       )
-      expect(execMock).not.toHaveBeenCalled()
+      expect(spawnMock).not.toHaveBeenCalled()
     } finally {
       Object.defineProperty(process, 'platform', {
         configurable: true,
@@ -294,9 +371,16 @@ describe('runHook', () => {
   it('settles WSL hooks when wsl.exe never reports completion', async () => {
     // Why no fake timers: the timeout is now runProcess's own, internal to the
     // mocked runWslProcess -- there is nothing left in hooks.ts to advance.
-    execMock.mockReset()
+    spawnMock.mockReset()
+    spawnMock.mockImplementation(() => fakeChild())
     runWslProcessMock.mockReset()
-    runWslProcessMock.mockResolvedValue({ environmentResolved: true, code: null, stdout: '', stderr: '', timedOut: true })
+    runWslProcessMock.mockResolvedValue({
+      environmentResolved: true,
+      code: null,
+      stdout: '',
+      stderr: '',
+      timedOut: true
+    })
 
     const fs = await import('node:fs')
     vi.mocked(fs.existsSync).mockReturnValue(true)

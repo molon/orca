@@ -18,32 +18,62 @@ const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'out', 'build', '.g
 export function isTestFile(relativePath: string): boolean {
   return (
     /\.(?:test|spec)\.tsx?$/.test(relativePath) ||
-    /(?:test-harness|test-utils|test-setup|test-fixture|repro)/.test(relativePath) ||
+    // `repro` must be a whole token: a bare substring exempted the shipped
+    // windows-terminal-capability-reprobe.ts from every guard using this walk.
+    /(?:test-harness|test-utils|test-setup|test-fixture|\brepro\b|reproduction)/.test(
+      relativePath
+    ) ||
     relativePath.includes('/__tests__/')
   )
 }
 
 export type ScannedFile = { path: string; relativePath: string; source: string }
 
+/** The three readdir type predicates the walk consults. */
+type DirentTypeProbe = {
+  isSymbolicLink(): boolean
+  isFile(): boolean
+  isDirectory(): boolean
+}
+
+/**
+ * Links need a stat to follow them, and so does DT_UNKNOWN (every predicate
+ * false) -- filesystems that do not report d_type would otherwise have a real
+ * directory silently dropped from the scan.
+ */
+export function directoryEntryNeedsStat(entry: DirentTypeProbe): boolean {
+  return entry.isSymbolicLink() || (!entry.isFile() && !entry.isDirectory())
+}
+
 /**
  * Every `.ts`/`.tsx` file under `root`, with its text.
  *
  * Dot-directories are skipped: they hold generated and vendored trees (the
  * cross-version e2e checkouts among them), which are not ours to fix.
+ *
+ * `extensions` widens or narrows which filenames are read -- a guard over CI
+ * config also has to see `.mjs`, and one that only wants test files pays for
+ * reading nothing else.
  */
-export function scanSourceTree(root: string, options: { includeTests?: boolean } = {}): ScannedFile[] {
+export function scanSourceTree(
+  root: string,
+  options: { includeTests?: boolean; extensions?: RegExp } = {}
+): ScannedFile[] {
+  const extensions = options.extensions ?? /\.tsx?$/
   const found: ScannedFile[] = []
   const visit = (directory: string): void => {
-    for (const entry of readdirSync(directory)) {
-      if (IGNORED_DIRECTORIES.has(entry) || entry.startsWith('.') || entry === '__fixtures__') {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const name = entry.name
+      if (IGNORED_DIRECTORIES.has(name) || name.startsWith('.') || name === '__fixtures__') {
         continue
       }
-      const path = join(directory, entry)
-      if (statSync(path).isDirectory()) {
+      const path = join(directory, name)
+      // Ordinary entries carry their type from readdir.
+      if (directoryEntryNeedsStat(entry) ? statSync(path).isDirectory() : entry.isDirectory()) {
         visit(path)
         continue
       }
-      if (!/\.tsx?$/.test(entry)) {
+      if (!extensions.test(name)) {
         continue
       }
       const relativePath = relative(root, path).replace(/\\/g, '/')
@@ -151,8 +181,52 @@ export function blankStringContentsDesynced(source: string): boolean {
   return blankStringContents(source, true) !== ''
 }
 
+/**
+ * After a value `/` is division; after an opener or a binary operator it opens
+ * a regex.
+ *
+ * The set is deliberately narrow, because the two errors are not symmetric. A
+ * false negative leaves a pattern unblanked, which at worst desyncs the lexer
+ * -- and every caller treats desync as an offender, so it fails closed. A
+ * false positive blanks live code, and a scan that cannot see a call reports
+ * it clean. A wider set cost 13 real JSX spans (`<Icon size={14} /> : <Icon`)
+ * and swallowed a whole `execFile(...)` after `n-- / 2`, with no desync to
+ * show for it.
+ *
+ * So the postfix and value-terminating characters are excluded even though
+ * each also has a prefix reading: `!` (non-null assertion vs `!/re/.test(x)`),
+ * `+` `-` `*` `%` `^` `~` (postfix `--`/`++`), and `>` `}` (JSX close).
+ */
+function startsRegexLiteral(prev: string | undefined): boolean {
+  return prev === undefined || '(,=:[&|?;'.includes(prev)
+}
+
+/** End index (exclusive) of the regex literal opening at `start`, or -1. */
+function findRegexLiteralEnd(source: string, start: number): number {
+  let inClass = false
+  for (let index = start + 1; index < source.length; index += 1) {
+    const char = source[index]
+    if (char === '\\') {
+      index += 1
+      continue
+    }
+    // A `/` inside `[...]` is literal, so it must not close the pattern.
+    if (char === '[') {
+      inClass = true
+    } else if (char === ']') {
+      inClass = false
+    } else if (char === '\n') {
+      return -1
+    } else if (char === '/' && !inClass) {
+      return index + 1
+    }
+  }
+  return -1
+}
+
 export function blankStringContents(source: string, reportDesync = false): string {
   let out = ''
+  let lastSignificantChar: string | undefined
   let index = 0
   let quote: string | null = null
   // Brace depth per interpolation, so a `}` inside `${ { a: 1 } }` does not
@@ -164,6 +238,7 @@ export function blankStringContents(source: string, reportDesync = false): strin
       templates.push(0)
       quote = null
       out += '${'
+      lastSignificantChar = '{'
       index += 2
       continue
     }
@@ -176,6 +251,7 @@ export function blankStringContents(source: string, reportDesync = false): strin
           templates.pop()
           quote = '`'
           out += char
+          lastSignificantChar = char
           index += 1
           continue
         }
@@ -200,20 +276,38 @@ export function blankStringContents(source: string, reportDesync = false): strin
       if (char === quote) {
         quote = null
         out += char
+        lastSignificantChar = char
       } else {
         out += char === '\n' ? char : ' '
       }
       index += 1
       continue
     }
+    // A regex literal can carry a lone apostrophe (`/'/g` in a shell quoter),
+    // which reads as a string opener and desyncs the rest of the file. The
+    // classic prev-token test disambiguates it from division: after a value a
+    // `/` divides, after an operator or opener it starts a pattern.
+    // `/*` and `//` open comments, never patterns. Callers normally strip
+    // comments first, but this runs standalone too, and at index 0 a file
+    // starting with a banner comment read as one giant regex.
+    const next = source[index + 1]
+    if (char === '/' && next !== '/' && next !== '*' && startsRegexLiteral(lastSignificantChar)) {
+      const end = findRegexLiteralEnd(source, index)
+      if (end !== -1) {
+        out += `/${' '.repeat(end - index - 1)}`
+        lastSignificantChar = '/'
+        index = end
+        continue
+      }
+    }
     if (char === "'" || char === '"' || char === '`') {
       quote = char
     }
     out += char
+    if (/\S/.test(char)) {
+      lastSignificantChar = char
+    }
     index += 1
-  }
-  if (reportDesync) {
-    return quote !== null || templates.length > 0 ? 'desynced' : ''
   }
   if (reportDesync) {
     return quote !== null || templates.length > 0 ? 'desynced' : ''

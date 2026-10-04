@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import type { RefObject } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ConnectionState } from '../transport/types'
@@ -9,19 +8,6 @@ import {
   shouldRecoverTerminalOnAppStateChange
 } from './terminal-foreground-recovery'
 
-const sessionSource = readFileSync(
-  new URL('../../app/h/[hostId]/session/[worktreeId].tsx', import.meta.url),
-  'utf8'
-)
-
-function sliceSessionSource(startPattern: string, endPattern: string): string {
-  const start = sessionSource.indexOf(startPattern)
-  expect(start).toBeGreaterThanOrEqual(0)
-  const end = sessionSource.indexOf(endPattern, start)
-  expect(end).toBeGreaterThan(start)
-  return sessionSource.slice(start, end)
-}
-
 type RecoveryHarness = {
   activeHandleRef: RefObject<string | null>
   terminalRefs: RefObject<Map<string, TerminalWebViewHandle>>
@@ -31,17 +17,14 @@ type RecoveryHarness = {
   subscribeToTerminal: ReturnType<typeof vi.fn<(handle: string) => void>>
   schedule: ReturnType<typeof vi.fn<(fn: () => void, ms: number) => void>>
   runScheduled: () => void
-  repaint: ReturnType<typeof vi.fn<() => void>>
 }
 
 function createHarness(): RecoveryHarness {
   const scheduled: Array<() => void> = []
-  const repaint = vi.fn()
   return {
-    repaint,
     activeHandleRef: { current: 'term-1' },
     terminalRefs: {
-      current: new Map([['term-1', { repaint } as unknown as TerminalWebViewHandle]])
+      current: new Map([['term-1', { repaint: vi.fn() } as unknown as TerminalWebViewHandle]])
     },
     initializedHandlesRef: { current: new Set(['term-1']) },
     connStateRef: { current: 'connected' },
@@ -89,7 +72,7 @@ describe('terminal foreground recovery', () => {
   it('marks inactive mounted terminal buffers stale so their next activation can replay', () => {
     const harness = createHarness()
     harness.terminalRefs.current.set('term-2', {
-      repaint: harness.repaint
+      repaint: vi.fn()
     } as unknown as TerminalWebViewHandle)
     harness.initializedHandlesRef.current.add('term-2')
 
@@ -147,60 +130,20 @@ describe('terminal foreground recovery', () => {
 
     expect(harness.subscribeToTerminal).not.toHaveBeenCalled()
   })
+})
 
+describe('terminal foreground repaint', () => {
   it('repaints every mounted pane, including while the socket is still down', () => {
+    const repaint = vi.fn()
     const harness = createHarness()
-    harness.terminalRefs.current.set('term-2', {
-      repaint: harness.repaint
-    } as unknown as TerminalWebViewHandle)
+    harness.terminalRefs.current = new Map([
+      ['term-1', { repaint } as unknown as TerminalWebViewHandle],
+      ['term-2', { repaint } as unknown as TerminalWebViewHandle]
+    ])
     harness.connStateRef.current = 'connecting'
 
     expect(recoverActiveTerminalAfterForeground(harness)).toBe('deferred')
-
-    // Both panes, and without waiting for the connection: iOS drops the backing
-    // store of hidden panes too, and the socket is usually still down at this
-    // edge — deferring the repaint is what left a stale picture on screen.
-    expect(harness.repaint).toHaveBeenCalledTimes(2)
-  })
-
-  it('repaints the pane being activated, which the page cannot detect itself', () => {
-    // Hidden panes are hidden with opacity, so WebKit reports every one visible
-    // and the page's own visibilitychange recovery never fires.
-    const switchTab = sliceSessionSource(
-      'const switchTab = useCallback(',
-      'const switchSessionTab = useCallback('
-    )
-    expect(switchTab).toContain('getTerminalRef(handle)?.repaint()')
-  })
-
-  it('is wired to AppState foregrounding in the session screen', () => {
-    const foregroundPredicate = sliceSessionSource(
-      'const shouldRecover = shouldRecoverTerminalOnAppStateChange(',
-      'previousAppState = nextAppState'
-    )
-
-    expect(sessionSource).toContain('shouldRecoverTerminalOnAppStateChange')
-    expect(foregroundPredicate).toContain('Platform.OS')
-    expect(sessionSource).toContain('recoverActiveTerminalAfterForeground({')
-    expect(sessionSource).toContain("AppState.addEventListener('change'")
-    const readinessInvalidation = sessionSource.indexOf(
-      'terminalRef.prepareForForegroundRecovery()'
-    )
-    const replay = sessionSource.indexOf('recoverActiveTerminalAfterForeground({')
-    expect(readinessInvalidation).toBeGreaterThanOrEqual(0)
-    expect(replay).toBeGreaterThan(readinessInvalidation)
-  })
-
-  it('re-runs a deferred recovery once the session screen reconnects', () => {
-    // Why: resume usually lands mid-reconnect; the session screen must retry
-    // recovery on the connState→connected transition or blanked panes stay
-    // stale until a manual tab switch.
-    expect(sessionSource).toContain("pendingForegroundRecoveryRef.current = outcome === 'deferred'")
-    const reconnectRetry = sliceSessionSource(
-      "if (connState !== 'connected' || !pendingForegroundRecoveryRef.current)",
-      'recoverActiveTerminalAfterForeground({'
-    )
-    expect(reconnectRetry).toContain('pendingForegroundRecoveryRef.current = false')
-    expect(reconnectRetry).toContain("AppState.currentState !== 'active'")
+    // iOS drops hidden panes' backing stores too, and the socket is usually still down here.
+    expect(repaint).toHaveBeenCalledTimes(2)
   })
 })

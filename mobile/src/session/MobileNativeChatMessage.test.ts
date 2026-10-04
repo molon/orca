@@ -3,14 +3,27 @@ import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MAX_TOOL_DETAIL_LENGTH } from '../../../src/shared/native-chat-tool-summary'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import { AGENT_SESSION_HOST_STATUS_COPY } from '../../../src/shared/agent-session-host-status-rows'
+import { colors } from '../theme/mobile-theme'
 
 vi.mock('react-native', async () => {
   const React = await import('react')
+  const Text = ({ children, ...props }: { children?: unknown }): unknown =>
+    React.createElement('Text', props, children)
   return {
+    ActivityIndicator: 'ActivityIndicator',
+    Animated: {
+      Text,
+      Value: class {
+        setValue(): void {}
+      },
+      loop: (animation: unknown) => animation,
+      sequence: () => ({ start: vi.fn(), stop: vi.fn() }),
+      timing: () => ({ start: vi.fn(), stop: vi.fn() })
+    },
     Image: 'Image',
     Pressable: 'Pressable',
-    Text: ({ children, ...props }: { children?: unknown }) =>
-      React.createElement('Text', props, children),
+    Text,
     View: ({ children, ...props }: { children?: unknown }) =>
       React.createElement('View', props, children),
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 }
@@ -21,7 +34,10 @@ vi.mock('lucide-react-native', () => ({
   ArrowUp: 'ArrowUp',
   ChevronDown: 'ChevronDown',
   Copy: 'Copy',
-  SquareChevronRight: 'SquareChevronRight'
+  SquareChevronRight: 'SquareChevronRight',
+  SquareTerminal: 'SquareTerminal',
+  Wrench: 'Wrench',
+  ChevronRight: 'ChevronRight'
 }))
 vi.mock('../components/MobileMarkdown', () => ({ MobileMarkdown: 'MobileMarkdown' }))
 
@@ -45,7 +61,19 @@ describe('MobileNativeChatMessage', () => {
 
   function render(
     message: NativeChatMessage,
-    props: { toolsExpanded?: boolean } = {}
+    props: {
+      fontScale?: number
+      toolsExpanded?: boolean
+      structuredActivityUi?: boolean
+      activeTurnIsWorking?: boolean
+      turnExpanded?: boolean
+      turnStatus?: {
+        startedAt: number | null
+        thinking: boolean
+        workedSeconds: number | null
+      } | null
+      onToggleTurn?: () => void
+    } = {}
   ): ReactTestRenderer {
     act(() => {
       renderer = create(createElement(MobileNativeChatMessage, { message, ...props }))
@@ -55,6 +83,38 @@ describe('MobileNativeChatMessage', () => {
 
   const textIn = (node: ReactTestInstance): string[] =>
     node.findAllByType('Text' as never).map((text) => String(text.children.join('')))
+
+  it.each(['system', 'user'] as const)(
+    'renders a %s host notice as selectable muted text rather than a markdown answer',
+    (role) => {
+      const tree = render(
+        {
+          id: 'notice',
+          role,
+          timestamp: 1,
+          blocks: [
+            { type: 'text', text: 'provider fallback', presentation: 'history-item-too-large' }
+          ]
+        },
+        { fontScale: 1.5 }
+      )
+      expect(tree.root.findAll((node) => String(node.type) === 'MobileMarkdown')).toHaveLength(0)
+      const text = tree.root.find((node) => String(node.type) === 'Text')
+      expect(text.props.children).toBe(AGENT_SESSION_HOST_STATUS_COPY['history-item-too-large'])
+      expect(text.props.selectable).toBe(true)
+      expect(Object.assign({}, ...text.props.style)).toMatchObject({
+        color: colors.textMuted,
+        fontSize: 25.5
+      })
+    }
+  )
+
+  it('preserves an ordinary assistant answer without interpreting its text as a host notice', () => {
+    const tree = render(toolMessage([{ type: 'text', text: 'provider fallback' }]))
+    expect(tree.root.find((node) => String(node.type) === 'MobileMarkdown').props.content).toBe(
+      'provider fallback'
+    )
+  })
 
   it('renders a loadable preview URI as an image thumbnail', () => {
     const tree = render(userMessage([{ type: 'image-ref', url: 'file:///a.jpg', alt: 'a photo' }]))
@@ -80,6 +140,21 @@ describe('MobileNativeChatMessage', () => {
       .findAllByType('Text' as never)
       .map((node) => String(node.children.join('')))
     expect(texts.some((text) => text.includes('/tmp/host.png'))).toBe(true)
+  })
+
+  it('makes user message text selectable', () => {
+    const tree = render(userMessage([{ type: 'text', text: 'Prompt I typed' }]))
+    const text = tree.root
+      .findAllByType('Text' as never)
+      .find((node) => String(node.children.join('')) === 'Prompt I typed')
+    expect(text?.props.selectable).toBe(true)
+  })
+
+  it('routes assistant prose through selectable Markdown', () => {
+    const tree = render(toolMessage([{ type: 'text', text: 'Agent reply prose' }]))
+    const markdown = tree.root.findByType('MobileMarkdown' as never)
+    expect(markdown.props.content).toBe('Agent reply prose')
+    expect(markdown.props.rangeSelectable).toBe(true)
   })
 
   it('labels a tool row with the target path instead of raw input JSON', () => {
@@ -151,5 +226,97 @@ describe('MobileNativeChatMessage', () => {
     expect(textIn(tree.root).filter((text) => text === input)).toHaveLength(1)
     expect(tree.root.findAllByType('ChevronDown' as never)).toHaveLength(1)
     expect(tree.root.findAllByType('SquareChevronRight' as never)).toHaveLength(1)
+  })
+
+  describe('structured activity UI', () => {
+    const runningCall = {
+      type: 'tool-call' as const,
+      name: 'Bash',
+      input: { command: 'npm test' },
+      state: 'running' as const
+    }
+    const settledCall = {
+      type: 'tool-call' as const,
+      name: 'Read',
+      input: { file_path: 'a/b.ts' },
+      state: 'completed' as const
+    }
+
+    it('shows the live tool label with a terminal glyph while a command runs', () => {
+      const tree = render(toolMessage([runningCall]), {
+        structuredActivityUi: true,
+        activeTurnIsWorking: true
+      })
+      expect(textIn(tree.root)).toContain('Running npm test')
+      expect(tree.root.findAllByType('SquareTerminal' as never)).toHaveLength(1)
+      expect(tree.root.findAllByType('Wrench' as never)).toHaveLength(0)
+    })
+
+    it('uses the wrench glyph for a non-command tool', () => {
+      const tree = render(
+        toolMessage([
+          { type: 'tool-call', name: 'Read', input: { file_path: 'a/b.ts' }, state: 'running' }
+        ]),
+        { structuredActivityUi: true, activeTurnIsWorking: true }
+      )
+      expect(textIn(tree.root)).toContain('Running Read a/b.ts')
+      expect(tree.root.findAllByType('Wrench' as never)).toHaveLength(1)
+    })
+
+    it('falls back to the collapsed count row once the run settles', () => {
+      const tree = render(toolMessage([settledCall]), {
+        structuredActivityUi: true,
+        activeTurnIsWorking: true
+      })
+      expect(textIn(tree.root)).not.toContain('Running Read a/b.ts')
+      expect(textIn(tree.root)).toContain('1×')
+    })
+
+    it("hides a completed turn's activity until the turn caret discloses it", () => {
+      const collapsed = render(toolMessage([settledCall]), {
+        structuredActivityUi: true,
+        activeTurnIsWorking: false
+      })
+      expect(textIn(collapsed.root)).not.toContain('1×')
+      act(() => collapsed.unmount())
+
+      const disclosed = render(toolMessage([settledCall]), {
+        structuredActivityUi: true,
+        activeTurnIsWorking: false,
+        turnExpanded: true
+      })
+      expect(textIn(disclosed.root)).toContain('1×')
+    })
+
+    it('lets the global Tools toggle reveal a hidden settled run', () => {
+      // Otherwise the composer's Tools control is a no-op on every settled turn.
+      const tree = render(toolMessage([settledCall]), {
+        structuredActivityUi: true,
+        activeTurnIsWorking: false,
+        toolsExpanded: true
+      })
+      expect(textIn(tree.root)).toContain('1\u00d7')
+    })
+
+    it('keeps the bridge lane on its always-visible tool run', () => {
+      const tree = render(toolMessage([settledCall]), { activeTurnIsWorking: false })
+      expect(textIn(tree.root)).toContain('1×')
+      expect(tree.root.findAllByType('Wrench' as never)).toHaveLength(0)
+    })
+
+    it('renders the settled turn status row under a user message', () => {
+      const tree = render(userMessage([{ type: 'text', text: 'go' }]), {
+        structuredActivityUi: true,
+        turnStatus: { startedAt: Date.now() - 3_000, thinking: false, workedSeconds: 3 }
+      })
+      expect(textIn(tree.root)).toContain('Worked for 3s')
+    })
+
+    it('does not render a turn status row without one', () => {
+      const tree = render(userMessage([{ type: 'text', text: 'go' }]), {
+        structuredActivityUi: true
+      })
+      expect(textIn(tree.root)).toEqual(['go'])
+    })
   })
 })

@@ -1,6 +1,7 @@
 // Why (#15117): an agent holding a private copy of the shared post command missed the move to
 // curl for three months, invisible to per-agent tests. Assert the invariant across every agent
-// at once: a managed Windows .cmd hook posts through curl.exe and spawns no interpreter.
+// at once: EOF-based managed Windows .cmd hooks post through curl.exe.
+// Antigravity keeps stdin open and instead tests its owned bounded Node reader separately.
 // Generated under a mocked win32 platform, not executed, so the POSIX CI legs guard it too.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
@@ -13,6 +14,10 @@ let previousUserDataPath: string | undefined
 
 const { homedirMock } = vi.hoisted(() => ({
   homedirMock: vi.fn<() => string>()
+}))
+
+vi.mock('../codex/codex-hook-trust-grant', () => ({
+  grantManagedCodexHookTrust: async () => ({ lane: 'fallback', reason: 'unsupported' })
 }))
 
 vi.mock('electron', () => ({
@@ -29,7 +34,6 @@ vi.mock('os', async (importOriginal) => {
   }
 })
 
-import { AntigravityHookService } from '../antigravity/hook-service'
 import { ClaudeHookService } from '../claude/hook-service'
 import { CodexHookService } from '../codex/hook-service'
 import { CommandCodeHookService } from '../command-code/hook-service'
@@ -44,7 +48,6 @@ import { openClaudeHookService } from '../openclaude/hook-service'
 // `.ps1` — PowerShell is its interpreter, not a child process it spawns per event — and Kimi's
 // is a Git Bash `.sh`, so neither is subject to this invariant.
 const BATCH_SCRIPT_INSTALLERS = [
-  { agent: 'antigravity', install: () => new AntigravityHookService().install() },
   { agent: 'claude', install: () => new ClaudeHookService().install() },
   { agent: 'openclaude', install: () => openClaudeHookService.install() },
   { agent: 'codex', install: () => new CodexHookService().install() },
@@ -56,11 +59,14 @@ const BATCH_SCRIPT_INSTALLERS = [
   { agent: 'grok', install: () => new GrokHookService().install() }
 ] as const
 
-function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
+// Why: the Codex installer awaits an app-server trust-grant session, so the
+// override has to stay pinned across the await instead of being restored by a
+// synchronous `finally` while the install is still running.
+async function withPlatform<T>(platform: NodeJS.Platform, run: () => T | Promise<T>): Promise<T> {
   const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
   Object.defineProperty(process, 'platform', { configurable: true, value: platform })
   try {
-    return run()
+    return await run()
   } finally {
     if (originalPlatform) {
       Object.defineProperty(process, 'platform', originalPlatform)
@@ -93,10 +99,10 @@ describe('Windows managed hook post interpreter', () => {
     home = ''
   })
 
-  it('posts through curl.exe from every managed batch script, spawning no interpreter', () => {
-    const scripts = withPlatform('win32', () => {
+  it('posts through curl.exe from every managed batch script, spawning no interpreter', async () => {
+    const scripts = await withPlatform('win32', async () => {
       for (const entry of BATCH_SCRIPT_INSTALLERS) {
-        expect(entry.install().state, `${entry.agent} install status`).toBe('installed')
+        expect((await entry.install()).state, `${entry.agent} install status`).toBe('installed')
       }
       const hooksDir = join(home, '.orca', 'agent-hooks')
       return readdirSync(hooksDir)

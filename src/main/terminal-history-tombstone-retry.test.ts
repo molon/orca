@@ -2,18 +2,13 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeAppEnvironment } from '../../config/scripts/vitest-host-ports-setup'
 
 let userDataDir: string
 
 const { removeHostTreeMock, deleteWslFishHistoryFileMock } = vi.hoisted(() => ({
   removeHostTreeMock: vi.fn<(dir: string) => Promise<void>>(),
   deleteWslFishHistoryFileMock: vi.fn<(distro: string, session: string) => Promise<void>>()
-}))
-
-vi.mock('electron', () => ({
-  app: {
-    getPath: () => userDataDir
-  }
 }))
 
 vi.mock('./host-tree-removal', () => ({
@@ -35,11 +30,22 @@ import {
   schedulePendingHistoryTreeRemovals
 } from './terminal-history-deletion'
 
+// Captured before any fake clock replaces the global: refilling the removal queue reads the
+// tombstone directory for real, and only a turn of the actual event loop can land that read.
+const realSetImmediate = setImmediate
+
+async function settleTombstoneDirectoryReads(): Promise<void> {
+  for (let index = 0; index < 10; index++) {
+    await new Promise((resolve) => realSetImmediate(resolve))
+  }
+}
+
 /** A tombstone whose rm fails once used to sit on disk for the rest of the session — only the next
  *  process start re-queued it. Prove the failure re-arms in-process, and that it stays bounded. */
 describe('tombstoned history removal retries', () => {
   beforeEach(() => {
     userDataDir = mkdtempSync(join(tmpdir(), 'orca-history-retry-'))
+    installFakeAppEnvironment({ getPath: () => userDataDir })
     removeHostTreeMock.mockReset()
     deleteWslFishHistoryFileMock.mockReset()
     deleteWslFishHistoryFileMock.mockResolvedValue(undefined)
@@ -128,9 +134,11 @@ describe('tombstoned history removal retries', () => {
     expect(deleteWslFishHistoryFileMock).toHaveBeenCalledTimes(64)
     expect(releases).toHaveLength(64)
 
-    while (releases.length > 0) {
+    for (let pass = 0; removeHostTreeMock.mock.calls.length < 1_000; pass++) {
+      expect(pass).toBeLessThan(200)
       releases.splice(0).forEach((release) => release())
       await vi.advanceTimersByTimeAsync(0)
+      await settleTombstoneDirectoryReads()
     }
     expect(removeHostTreeMock).toHaveBeenCalledTimes(1_000)
     expect(deleteWslFishHistoryFileMock).toHaveBeenCalledTimes(1_000)

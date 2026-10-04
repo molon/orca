@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createHookListenerState, normalizeHookPayload } from './agent-hook-listener'
+import { createHookListenerState } from './agent-hook-listener/listener-state'
+import { normalizeHookPayload } from './agent-hook-listener'
 import { makePaneKey } from './stable-pane-id'
 
 const PANE_KEY = makePaneKey('tab-1', '11111111-1111-4111-8111-111111111111')
@@ -26,7 +27,7 @@ describe('OpenCode-family permission request status', () => {
     state = createHookListenerState()
   })
 
-  const SOURCES = ['opencode', 'mimo-code'] as const
+  const SOURCES = ['opencode', 'opencode2', 'mimo-code'] as const
 
   function permissionEvent(
     source: (typeof SOURCES)[number],
@@ -84,6 +85,21 @@ describe('OpenCode-family permission request status', () => {
     const event = permissionEvent(source, BASH_PERMISSION)
 
     expect(event?.payload.toolInput).toBe('rm -rf build/')
+  })
+
+  it.each(SOURCES)('carries the real v2 shell request as an approval card for %s', (source) => {
+    const event = permissionEvent(source, {
+      id: 'per_native',
+      sessionID: 'ses_native',
+      permission: 'shell',
+      patterns: ['printf PERMISSION_NATIVE_OK'],
+      source: { type: 'tool', messageID: 'msg_native', id: 'functions.shell:0' }
+    })
+    expect(event?.payload.interactivePrompt).toBe(
+      JSON.stringify({
+        approval: { tool: 'shell', summary: 'printf PERMISSION_NATIVE_OK' }
+      })
+    )
   })
 
   it.each(SOURCES)('names the edited file for %s', (source) => {
@@ -188,6 +204,7 @@ describe('OpenCode-family permission request status', () => {
     expect(resumed?.payload.state).toBe('working')
     expect(resumed?.payload.toolName).toBeUndefined()
     expect(resumed?.payload.toolInput).toBeUndefined()
+    expect(resumed?.payload.interactivePrompt).toBeUndefined()
   })
 
   it.each(SOURCES)('retires the permission when the session goes idle for %s', (source) => {
@@ -197,6 +214,7 @@ describe('OpenCode-family permission request status', () => {
     expect(idle?.payload.state).toBe('done')
     expect(idle?.payload.toolName).toBeUndefined()
     expect(idle?.payload.toolInput).toBeUndefined()
+    expect(idle?.payload.interactivePrompt).toBeUndefined()
   })
 
   it.each(SOURCES)(
@@ -239,9 +257,9 @@ describe('OpenCode-family permission request status', () => {
   })
 
   it.each(SOURCES)('does not carry an answered permission into a later turn for %s', (source) => {
-    // Why: isNewTurnEvent is false for this family, so nothing else ever resets the cached
-    // tool. Without an explicit retire, one permission pins its command to every later
-    // working frame in the pane — the exact stale-tool-line the row gate guards against.
+    // Why: no isNewTurnEvent boundary fires mid-session for this family, so nothing else
+    // resets the cached tool. Without an explicit retire, one permission pins its command to
+    // every later working frame in the pane — the exact stale-tool-line the row gate guards against.
     permissionEvent(source, BASH_PERMISSION)
     lifecycleEvent(source, 'SessionBusy')
     lifecycleEvent(source, 'SessionIdle')

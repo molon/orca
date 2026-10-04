@@ -1,6 +1,10 @@
+import { startAndroidForegroundPushPresentation } from '../src/notifications/android-foreground-push'
+import { registerPushDismissalTask } from '../src/notifications/push-background-dismissal'
+import { readNativeNotificationData } from '../src/notifications/native-notification-data'
+import { setNotificationViewingWorkspace } from '../src/notifications/notification-viewing-policy'
 import { useCallback, useEffect, useRef } from 'react'
 import { AppState, View, StyleSheet } from 'react-native'
-import { Stack, useRouter } from 'expo-router'
+import { Stack, useRouter, useGlobalSearchParams, usePathname } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SplashScreen from 'expo-splash-screen'
 import * as Notifications from 'expo-notifications'
@@ -14,31 +18,47 @@ import {
   startTerminalLivenessLog
 } from '../src/terminal/terminal-liveness-log'
 import { useOpenNotificationRoute } from '../src/notifications/use-open-notification-route'
+import {
+  isRemotePushTrigger,
+  pushNotificationRouteData,
+  foregroundNotificationBehavior
+} from '../src/notifications/push-receive'
+import { startPushTokenSync } from '../src/notifications/push-registration'
+import { resubscribePairedChannels } from '../src/notifications/push-channel-connect'
+import { ensureDesktopNotificationChannel } from '../src/notifications/desktop-notification-channel'
 import { loadHostCatalog } from '../src/transport/host-store'
 import { extractPairingCodeFromUrl } from '../src/transport/pairing'
 import { recoverMobileRelayPairing } from '../src/transport/mobile-relay-pairing-recovery'
+import { appUpdateChecker } from '../src/app-update/app-update-runtime'
 
 // Why: keeps the native splash screen visible until the React tree is mounted
 // and ready to render. Without this the user sees a blank white/black frame
 // between the native splash and the first React paint.
 SplashScreen.preventAutoHideAsync()
 
-// Why: without this, expo-notifications silently drops notifications when
-// the app is in the foreground. Setting all three to true makes iOS/Android
-// display the banner, play the sound, and show the badge even while the
-// app is active. This runs once at module load time before any notification
-// is scheduled.
+// Why at boot and not only on subscribe: the gateway's FCM payload targets the
+// 'orca-desktop' channel, and a background push can land before any socket has
+// connected. Android drops a notification whose channel does not exist yet.
+void ensureDesktopNotificationChannel().catch(() => {})
+void registerPushDismissalTask().catch(() => {})
+
+// Register before scheduling so foreground delivery uses the same suppression policy.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false
-  })
+  handleNotification: foregroundNotificationBehavior
 })
 
 export default function RootLayout() {
   const router = useRouter()
+  const pathname = usePathname()
+  const { hostId, worktreeId } = useGlobalSearchParams<{ hostId?: string; worktreeId?: string }>()
+  useEffect(() => {
+    setNotificationViewingWorkspace(
+      pathname.includes('/session/') && typeof hostId === 'string' && typeof worktreeId === 'string'
+        ? { hostId, worktreeId }
+        : null
+    )
+    return () => setNotificationViewingWorkspace(null)
+  }, [pathname, hostId, worktreeId])
   const openNotificationRoute = useOpenNotificationRoute()
   const handledNotificationIdsRef = useRef<Set<string>>(new Set())
 
@@ -58,6 +78,17 @@ export default function RootLayout() {
     const sub = AppState.addEventListener('change', (next) => noteTerminalAppState(next))
     return () => sub.remove()
   }, [])
+  // Why: a rolled APNs/FCM token stops delivering silently, so every paired host
+  // has to be re-registered with the new one as soon as the provider hands it over.
+  useEffect(() => startPushTokenSync(), [])
+  // Same for orca-push channels: their publisher is a hook, not a paired host,
+  // so only launch can renew the subscription.
+  useEffect(() => {
+    void resubscribePairedChannels()
+  }, [])
+  // Cold start, then foreground and timer checks on the desktop updater's cadence.
+  useEffect(() => appUpdateChecker.start(), [])
+  useEffect(() => startAndroidForegroundPushPresentation(), [])
 
   // Why: route `orca://pair?...` deep links to the confirm screen so
   // the same pairing flow runs whether the link arrived via QR scan,
@@ -109,9 +140,18 @@ export default function RootLayout() {
       }
     }
 
-    async function getNavigationTarget(data: unknown) {
+    async function getNavigationTarget(notification: Notifications.Notification) {
       const hosts = await loadHostCatalog().catch(() => null)
-      return getNotificationNavigationTarget(data, {
+      const data = readNativeNotificationData(notification.request)
+      // A gateway push names its host by key fingerprint, not by this device's hostId.
+      // With no catalog to resolve against, such a push stays unrouted instead of
+      // falling back to whatever hostId its raw data carries.
+      const routeData = pushNotificationRouteData(
+        data,
+        hosts ?? [],
+        isRemotePushTrigger(notification.request.trigger)
+      )
+      return getNotificationNavigationTarget(routeData, {
         knownHostIds: hosts ? new Set(hosts.map((host) => host.id)) : undefined,
         credentialStatusByHostId: hosts
           ? new Map(hosts.map((host) => [host.id, host.credentialStatus]))
@@ -139,7 +179,7 @@ export default function RootLayout() {
         }
       }
 
-      const target = await getNavigationTarget(response.notification.request.content.data)
+      const target = await getNavigationTarget(response.notification)
       clearLastNotificationResponse()
       if (disposed) {
         return

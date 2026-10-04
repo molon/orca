@@ -75,3 +75,16 @@ export function planTerminalStreamRestart(
   })
   return restartMs
 }
+
+/** Plans the restart and hands its delay to `schedule`, when there is one. */
+export function restartIfUnstarted(
+  handle: string,
+  seq: number,
+  type: string,
+  schedule: (delayMs: number) => void
+): void {
+  const restartMs = planTerminalStreamRestart(handle, seq, type)
+  if (restartMs !== null) {
+    schedule(restartMs)
+  }
+}

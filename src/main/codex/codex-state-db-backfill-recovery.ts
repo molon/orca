@@ -1,4 +1,3 @@
-import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -8,9 +7,14 @@ import { withManagedHookInstallLock } from '../agent-hooks/managed-hook-install-
 import { readManagedHookHostIdentity } from '../agent-hooks/managed-hook-owner-identity'
 import { buildWslCodexAppServerArgs } from '../codex-accounts/wsl-codex-command'
 import { resolveCodexCommand } from '../codex-cli/command'
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { CODEX_READ_ONLY_APP_SERVER_ARGS } from '../codex-cli/codex-read-only-app-server-args'
 import { terminateCodexProbeChild } from '../rate-limits/codex-probe-termination'
-import { getSpawnArgsForWindows } from '../win32-utils'
+import type { ChildProcessHandle } from '../../shared/child-process/process-spec'
+import {
+  spawnCodexAppServerProcess,
+  type CodexAppServerSpawn
+} from './codex-app-server-process-tree-kill'
 import { getOrcaUserDataPath } from './codex-home-paths'
 import {
   BACKFILL_PENDING_MIN_SESSION_FILES,
@@ -33,17 +37,17 @@ export type CodexStateDbBackfillRecoverySummary = {
 }
 
 type RecoveryDependencies = {
-  spawnProcess: typeof spawn
+  spawnProcess: CodexAppServerSpawn
   resolveCommand: () => string
   readStatus: (codexHomePath: string) => CodexStateDbBackfillStatus
   countSessions: (sessionsRoot: string, limit: number) => number
   now: () => number
   sleep: (ms: number, signal: AbortSignal) => Promise<void>
-  terminate: (child: ChildProcess) => Promise<void>
+  terminate: (child: ChildProcessHandle) => Promise<void>
 }
 
 const defaultDependencies: RecoveryDependencies = {
-  spawnProcess: spawn,
+  spawnProcess: spawnCodexAppServerProcess,
   resolveCommand: resolveCodexCommand,
   readStatus: readCodexStateDbBackfillStatus,
   countSessions: countCodexSessionFilesUpTo,
@@ -85,7 +89,7 @@ function initialRecoveryDecision(
 function spawnRecoveryProcess(
   codexHomePath: string,
   dependencies: RecoveryDependencies
-): ChildProcess {
+): ChildProcessHandle {
   const wslHome = process.platform === 'win32' ? parseWslUncPath(codexHomePath) : null
   if (wslHome) {
     return dependencies.spawnProcess(
@@ -103,14 +107,11 @@ function spawnRecoveryProcess(
     )
   }
   const command = dependencies.resolveCommand()
-  const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(command, [
-    ...CODEX_READ_ONLY_APP_SERVER_ARGS
-  ])
-  return dependencies.spawnProcess(spawnCmd, spawnArgs, {
+  return dependencies.spawnProcess(command, [...CODEX_READ_ONLY_APP_SERVER_ARGS], {
     cwd: codexHomePath,
     stdio: ['pipe', 'ignore', 'ignore'],
     windowsHide: true,
-    env: { ...process.env, CODEX_HOME: codexHomePath }
+    env: withCliRuntimeOnPath(command, { ...process.env, CODEX_HOME: codexHomePath })
   })
 }
 

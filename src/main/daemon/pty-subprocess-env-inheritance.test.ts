@@ -70,8 +70,9 @@ vi.mock('../providers/agent-foreground-process', () => ({
 // fake timers; default to "shell-only" so the degraded-scan guard falls through
 // to its existing retirement logic (the degraded-scan behavior itself is
 // covered in pty-subprocess-foreground-degraded-scan.test.ts).
-vi.mock('../providers/windows-conpty-process-membership', () => ({
-  readWindowsConptyProcessIds: () => Promise.resolve(new Set([12345]))
+vi.mock('../providers/windows-pty-job-membership', () => ({
+  readWindowsPtyJobProcessIds: () => new Set([12345]),
+  isWindowsPtyJobReadable: () => true
 }))
 
 import { createPtySubprocess } from './pty-subprocess'
@@ -103,6 +104,7 @@ describe('createPtySubprocess', () => {
         cwd: 'C:\\repo',
         env: {
           ORCA_AGENT_TEAMS_TEAM_ID: 'team-test',
+          orca_agent_hook_node: 'C:\\Stale\\node.exe',
           ORCA_PATH_ROOT: 'C:\\Users\\orca\\AppData\\Local',
           PATH: '%orca_path_root%\\agy\\bin;C:\\Windows'
         }
@@ -113,6 +115,8 @@ describe('createPtySubprocess', () => {
       }
     }
 
+    expect(spawnMock.mock.calls.at(-1)?.[2].env.ORCA_AGENT_HOOK_NODE).toBe(process.execPath)
+    expect(spawnMock.mock.calls.at(-1)?.[2].env.orca_agent_hook_node).toBeUndefined()
     expect(spawnMock.mock.calls.at(-1)?.[2].env.PATH).toBe(
       'C:\\Users\\orca\\AppData\\Local\\agy\\bin;C:\\Windows'
     )
@@ -124,11 +128,13 @@ describe('createPtySubprocess', () => {
     const saved = {
       ORCA_PANE_KEY: process.env.ORCA_PANE_KEY,
       ORCA_TAB_ID: process.env.ORCA_TAB_ID,
-      ORCA_WORKTREE_ID: process.env.ORCA_WORKTREE_ID
+      ORCA_WORKTREE_ID: process.env.ORCA_WORKTREE_ID,
+      ORCA_WSL_CLI_DIR: process.env.ORCA_WSL_CLI_DIR
     }
     process.env.ORCA_PANE_KEY = 'parent-tab:parent-leaf'
     process.env.ORCA_TAB_ID = 'parent-tab'
     process.env.ORCA_WORKTREE_ID = 'parent-worktree'
+    process.env.ORCA_WSL_CLI_DIR = 'C:/parent/wsl-managed-cli'
 
     try {
       await createPtySubprocess({ sessionId: 'test', cols: 80, rows: 24 })
@@ -146,6 +152,7 @@ describe('createPtySubprocess', () => {
     expect(env.ORCA_PANE_KEY).toBeUndefined()
     expect(env.ORCA_TAB_ID).toBeUndefined()
     expect(env.ORCA_WORKTREE_ID).toBeUndefined()
+    expect(env.ORCA_WSL_CLI_DIR).toBeUndefined()
   })
 
   it('preserves explicit child Orca pane identity over parent env', async () => {
@@ -310,6 +317,41 @@ describe('createPtySubprocess', () => {
 
     const env = spawnMock.mock.calls.at(-1)?.[2].env
     expect(env.ELECTRON_RUN_AS_NODE).toBeUndefined()
+  })
+
+  it('does not forward a half-activated conda env from the daemon process env', async () => {
+    // Why here as well as the main process: the daemon fork composes its own
+    // inherited env, which main never sees, so it is the default terminal's
+    // only chance to drop a CONDA_SHLVL sentinel left without a prefix (#14195).
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const saved = {
+      CONDA_SHLVL: process.env.CONDA_SHLVL,
+      CONDA_PREFIX: process.env.CONDA_PREFIX,
+      CONDA_DEFAULT_ENV: process.env.CONDA_DEFAULT_ENV,
+      CONDA_EXE: process.env.CONDA_EXE
+    }
+    delete process.env.CONDA_PREFIX
+    process.env.CONDA_SHLVL = '1'
+    process.env.CONDA_DEFAULT_ENV = 'base'
+    process.env.CONDA_EXE = '/opt/miniconda3/bin/conda'
+
+    try {
+      await createPtySubprocess({ sessionId: 'test', cols: 80, rows: 24 })
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key]
+        } else {
+          process.env[key] = value
+        }
+      }
+    }
+
+    const env = spawnMock.mock.calls.at(-1)?.[2].env
+    expect(env.CONDA_SHLVL).toBeUndefined()
+    expect(env.CONDA_DEFAULT_ENV).toBeUndefined()
+    expect(env.CONDA_EXE).toBe('/opt/miniconda3/bin/conda')
   })
 
   it('does not inherit legacy attribution state from a pre-upgrade daemon', async () => {

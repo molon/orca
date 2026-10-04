@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const sessionRouteSource = readFileSync(
-  join(__dirname, '../../app/h/[hostId]/session/[worktreeId].tsx'),
+  join(__dirname, '../session/use-mobile-session-lifecycle.ts'),
   'utf8'
 )
 

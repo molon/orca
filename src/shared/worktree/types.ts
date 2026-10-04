@@ -1,10 +1,13 @@
 import type { ExecutionHostId } from '../execution-host'
+import type { WorktreeCatalogVersion } from './catalog-version'
 import type { AutomationExecutionTargetType } from '../automations-types'
 import type { TaskSourceContext } from '../task-source-context'
 import type { TuiAgent } from '../tui-agent'
 import type { DiffComment, MobileDiffReviewState } from '../diff-comment-types'
 import type { EphemeralVmCheckoutMode } from '../orca-yaml-hook-types'
 import type { BuiltInWorktreeVisibilitySourceId } from '../repo-types'
+import type { WorktreeIdentity } from './identity'
+import type { WorktreeScanFailureKind } from '../worktree-scan-failure'
 
 export type WorkspaceLinkedItem = {
   provider: 'github' | 'gitlab' | 'linear' | 'jira'
@@ -34,6 +37,9 @@ export type GitWorktreeInfo = {
   /** True for the repo's main working tree (the first entry from `git worktree list`).
    *  Linked worktrees created via `git worktree add` have this set to false. */
   isMainWorktree: boolean
+  /** Not from Git: the error of a local delete that failed after Git dropped this checkout's
+   *  registration. The host lists the leftover so Delete can retry it. */
+  removalError?: string
 }
 
 /** Head/branch snapshot read from Git metadata files without spawning Git.
@@ -60,6 +66,8 @@ export type WorkspaceStatusDefinition = {
 export type Worktree = {
   id: string // `${repoId}::${path}`
   instanceId?: string
+  /** Immutable host/instance identity. Optional while legacy rows migrate. */
+  identity?: WorktreeIdentity
   repoId: string
   /** Durable project identity. Optional while legacy repo-only workspaces migrate. */
   projectId?: string
@@ -74,9 +82,13 @@ export type Worktree = {
   /** Checkout ownership for a recipe-provisioned main workspace. */
   ephemeralVmCheckoutMode?: EphemeralVmCheckoutMode
   displayName: string
+  /** Projection of persisted display-name provenance. */
+  displayNameMode?: 'fixed' | 'automatic'
   comment: string
   linkedIssue: number | null
   linkedPR: number | null
+  /** GitHub PR hidden from branch discovery after an explicit unlink. */
+  suppressedGitHubPR?: number | null
   linkedLinearIssue: string | null
   linkedLinearIssueWorkspaceId?: string | null
   linkedLinearIssueOrganizationUrlKey?: string | null
@@ -134,6 +146,9 @@ export type Worktree = {
   mobileDiffReview?: MobileDiffReviewState
   automationProvenance?: AutomationWorkspaceProvenance
   cliProvenance?: CliWorkspaceProvenance
+  /** The host is deleting this checkout in the background; Git lists it until that finishes.
+   *  Sent only to clients that advertise `worktree.background-removal.v1`. */
+  removing?: true
 } & GitWorktreeInfo
 
 /** Provenance for workspaces created through `orca worktree create`. Absent on
@@ -214,4 +229,10 @@ export type DetectedWorktreeListResult = {
   authoritative: boolean
   source: DetectedWorktreeListSource
   worktrees: DetectedWorktree[]
+  /** Why a non-authoritative listing could not be scanned; additive, older hosts omit it. */
+  unavailableReason?: string
+  /** Structured cause captured by the execution host when a scan fails. */
+  failureKind?: WorktreeScanFailureKind
+  /** Which catalog this listing describes; additive, older hosts omit it. */
+  catalogVersion?: WorktreeCatalogVersion
 }

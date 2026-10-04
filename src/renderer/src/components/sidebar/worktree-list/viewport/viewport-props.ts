@@ -47,8 +47,8 @@ export type VirtualizedWorktreeViewportProps = {
   handleCreateGroupFromRepo: (repo: Repo) => void
   handleMoveProjectToGroup: (repo: Repo, groupId: string) => void
   handleRemoveProjectFromGroup: (repo: Repo) => void
-  handleRenameProjectGroup: (groupId: string, currentName: string) => void
-  handleDeleteProjectGroup: (groupId: string, groupName: string) => void
+  handleRenameProjectGroup: (groupId: string, currentName: string, hostId?: ExecutionHostId) => void
+  handleDeleteProjectGroup: (groupId: string, groupName: string, hostId?: ExecutionHostId) => void
   handleCreateFolderWorkspace: (projectGroup: ProjectGroup) => void
   activeModal: string
   pendingRevealWorktree: PendingSidebarWorktreeReveal | null
@@ -87,6 +87,7 @@ export type VirtualizedWorktreeViewportProps = {
   onPinWorktrees: (worktreeIds: readonly string[]) => void
   onDropWorktreesOnWorkspaceBoard: (args: WorktreeStatusDropAtIndexArgs) => void
   workspaceBoardOpen: boolean
+  onWorktreeCardClick?: () => void
   onWorkspaceBoardDragPreviewStart: () => void
   onWorkspaceBoardDragPreviewCommit: () => void
   onWorkspaceBoardDragPreviewCancel: () => void

@@ -1,11 +1,14 @@
 import { joinPath, dirname, normalizeRelativePath } from '@/lib/path'
 import {
+  isWindowsAbsolutePathLike,
   normalizeRuntimePathForComparison,
   relativePathInsideRoot
 } from '../../../../shared/cross-platform-path'
 
 export function normalizeExplorerAbsolutePath(path: string): string {
-  return path === '/' || /^[A-Za-z]:[\\/]$/.test(path) ? path : path.replace(/[\\/]+$/, '')
+  return path === '/' || /^[A-Za-z]:[\\/]$/.test(path)
+    ? path
+    : path.replace(isWindowsAbsolutePathLike(path) ? /[\\/]+$/ : /\/+$/, '')
 }
 
 export function getExternalFileChangeRelativePath(
@@ -23,7 +26,7 @@ export function getExternalFileChangeRelativePath(
   }
 
   // Why: EditorPanel reloads tabs only from a worktree-relative path, not the watcher's absolute one; normalize or contents go stale.
-  return normalizeRelativePath(relativePath)
+  return normalizeRelativePath(relativePath, worktreePath)
 }
 
 export function canonicalizeFileExplorerWatchPath(
@@ -55,18 +58,21 @@ export function createCachedDirPathIndex(
 /**
  * Map an event path to the dirCache key that should be refreshed.
  * Windows watchers often differ in drive-letter casing from the worktree key.
+ *
+ * Why the index is a thunk: the direct `dirPath in cache` hit answers nearly every lookup outside
+ * Windows casing drift, so building it eagerly costs one normalize per cached dir for nothing.
  */
 export function resolveCachedDirPath(
   cache: Record<string, { children: unknown }>,
   dirPath: string,
   worktreePath?: string,
-  cachePathIndex?: ReadonlyMap<string, string>
+  cachePathIndex?: () => ReadonlyMap<string, string>
 ): string | null {
   if (dirPath in cache) {
     return dirPath
   }
   const target = normalizeRuntimePathForComparison(dirPath)
-  const indexedPath = cachePathIndex?.get(target)
+  const indexedPath = cachePathIndex?.().get(target)
   if (indexedPath) {
     return indexedPath
   }
@@ -84,6 +90,10 @@ export function resolveCachedDirPath(
 }
 
 export function parentDirForWatchPath(normalizedPath: string): string {
+  if (!isWindowsAbsolutePathLike(normalizedPath)) {
+    const separator = normalizedPath.lastIndexOf('/')
+    return separator === -1 ? '.' : normalizedPath.slice(0, separator) || '/'
+  }
   const parentPath = dirname(normalizedPath)
   if (/^[A-Za-z]:$/.test(parentPath)) {
     return `${parentPath}${normalizedPath.includes('\\') ? '\\' : '/'}`

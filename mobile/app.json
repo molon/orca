@@ -2,7 +2,7 @@
   "expo": {
     "name": "Orca",
     "slug": "orca-mobile",
-    "version": "0.0.44",
+    "version": "0.0.51",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -75,10 +75,11 @@
       "allowBackup": false,
       "permissions": ["RECORD_AUDIO", "MODIFY_AUDIO_SETTINGS"],
       "package": "com.molon.orca",
-      "versionCode": 13
+      "versionCode": 18
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       "./plugins/android-respect-rotation-lock.js",
       "./plugins/aps-environment.js",
       [

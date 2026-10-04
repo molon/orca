@@ -1,5 +1,6 @@
 import type { GlobalSettings } from '../../../shared/global-settings-types'
 import type { TuiAgent } from '../../../shared/tui-agent'
+import type { TerminalInputKind } from '../../../shared/terminal-input-kind'
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
 import { resolveDraftPasteReadyTimeoutMs } from '../../../shared/draft-paste-ready-timeout'
 import { useAppStore } from '@/store'
@@ -9,8 +10,7 @@ import {
 } from '@/runtime/runtime-terminal-inspection'
 import {
   BRACKETED_PASTE_END,
-  BRACKETED_PASTE_START,
-  sanitizeTerminalPasteText
+  BRACKETED_PASTE_START
 } from '@/components/terminal-pane/terminal-bracketed-paste'
 import { runTerminalPtyInputTransaction } from '@/components/terminal-pane/terminal-pty-input-transaction'
 import { waitForAgentReady } from './agent-ready-wait'
@@ -35,10 +35,6 @@ export {
 export const BRACKETED_PASTE_BEGIN = BRACKETED_PASTE_START
 export { BRACKETED_PASTE_END }
 export const POST_PASTE_SUBMIT_DELAY_MS = 50
-
-export function sanitizeBracketedPasteContent(content: string): string {
-  return sanitizeTerminalPasteText(content)
-}
 
 // Why: "the tab has a PTY" and "the agent's composer accepts input" are separate
 // states with separate failure modes, so they get separate budgets. A PTY that
@@ -86,8 +82,10 @@ export async function pasteDraftWhenAgentReady(args: {
   forcePaste?: boolean
   timeoutMs?: number
   onTimeout?: () => void
+  onUnconfirmedDelivery?: () => void
 }): Promise<boolean> {
-  const { tabId, content, agent, submit, forcePaste, timeoutMs, onTimeout } = args
+  const { tabId, content, agent, submit, forcePaste, timeoutMs, onTimeout, onUnconfirmedDelivery } =
+    args
 
   const agentConfig = agent ? TUI_AGENT_CONFIG[agent] : null
 
@@ -128,13 +126,20 @@ export async function pasteDraftWhenAgentReady(args: {
       onTimeout?.()
       return false
     }
+    // Why: the process merely exists -- its composer was never observed. On Windows this is
+    // the ONLY path: ConPTY does not forward DECSET 2004, so no 2004-anchored ready signal
+    // can ever fire. Callers must be able to tell this blind write apart from a real delivery.
+    onUnconfirmedDelivery?.()
   }
 
   return await sendBracketedPasteToAgent({
     settings,
     ptyId,
     content,
-    submit: submit === true
+    submit: submit === true,
+    agent,
+    // Why launch: this delivers the prompt or draft an agent is started with.
+    inputKind: 'launch'
   })
 }
 
@@ -147,8 +152,19 @@ export async function pasteDraftToAgentPtyWhenReady(args: {
   forcePaste?: boolean
   timeoutMs?: number
   onTimeout?: () => void
+  onUnconfirmedDelivery?: () => void
 }): Promise<boolean> {
-  const { tabId, ptyId, content, agent, submit, forcePaste, timeoutMs, onTimeout } = args
+  const {
+    tabId,
+    ptyId,
+    content,
+    agent,
+    submit,
+    forcePaste,
+    timeoutMs,
+    onTimeout,
+    onUnconfirmedDelivery
+  } = args
   const agentConfig = agent ? TUI_AGENT_CONFIG[agent] : null
 
   if (agentDeliversDraftViaNativePrefill(agent, forcePaste)) {
@@ -167,13 +183,17 @@ export async function pasteDraftToAgentPtyWhenReady(args: {
       onTimeout?.()
       return false
     }
+    onUnconfirmedDelivery?.()
   }
 
   return await sendBracketedPasteToAgent({
     settings,
     ptyId,
     content,
-    submit: submit === true
+    submit: submit === true,
+    agent,
+    // Why launch: this delivers the prompt or draft an agent is started with.
+    inputKind: 'launch'
   })
 }
 
@@ -186,7 +206,8 @@ export async function submitPromptToAgentPty(args: {
     settings: getSettingsForAgentTabRuntimeOwner(args.tabId),
     ptyId: args.ptyId,
     content: args.content,
-    submit: true
+    submit: true,
+    inputKind: 'driving'
   })
 }
 
@@ -194,7 +215,7 @@ export async function sendBracketedPasteToRunningAgent(args: {
   ptyId: string
   content: string
 }): Promise<boolean> {
-  return await sendBracketedPasteToAgent({ ptyId: args.ptyId, content: args.content, submit: true })
+  return await sendBracketedPasteToAgent({ ...args, submit: true, inputKind: 'driving' })
 }
 
 async function sendBracketedPasteToAgent(args: {
@@ -202,13 +223,17 @@ async function sendBracketedPasteToAgent(args: {
   ptyId: string
   content: string
   submit: boolean
+  agent?: TuiAgent
+  inputKind: TerminalInputKind
 }): Promise<boolean> {
-  const { settings = useAppStore.getState().settings, ptyId, content, submit } = args
+  const { settings = useAppStore.getState().settings, ptyId, content, submit, agent } = args
+  const { inputKind } = args
+  const submitRetryDelayMs = agent ? TUI_AGENT_CONFIG[agent]?.submitRetryDelayMs : undefined
   try {
-    // Why: paste + Enter must be one transaction, or a concurrent paste on this PTY
-    // can slip between them and submit a half-written prompt.
+    // Why: paste + Enter (+ retry Enter) must be one transaction, or a concurrent
+    // paste on this PTY can slip between them and submit a half-written prompt.
     return await runTerminalPtyInputTransaction(ptyId, async () => {
-      const pasted = await sendAgentDraftPasteContentNow(settings, ptyId, content)
+      const pasted = await sendAgentDraftPasteContentNow(settings, ptyId, content, inputKind)
       if (!pasted || !submit) {
         return pasted
       }
@@ -217,7 +242,20 @@ async function sendBracketedPasteToAgent(args: {
       // Enter arrive in the same PTY write. Split the submit into the next turn so
       // the TUI processes bracketed-paste termination before handling Enter.
       await new Promise<void>((resolve) => window.setTimeout(resolve, POST_PASTE_SUBMIT_DELAY_MS))
-      return await sendRuntimePtyInputVerified(settings, ptyId, '\r')
+      const submitted = await sendRuntimePtyInputVerified(settings, ptyId, '\r', inputKind)
+
+      if (submitRetryDelayMs !== undefined) {
+        // Why: agents that render their composer before Enter is live silently eat
+        // the first Enter; the retry is best-effort and never downgrades `submitted`.
+        await new Promise<void>((resolve) => window.setTimeout(resolve, submitRetryDelayMs))
+        try {
+          await sendRuntimePtyInputVerified(settings, ptyId, '\r', inputKind)
+        } catch {
+          // Why: a rejected retry leaves the first Enter's verdict untouched.
+        }
+      }
+
+      return submitted
     })
   } catch {
     return false

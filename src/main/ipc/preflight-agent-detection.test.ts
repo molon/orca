@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type * as LocalCommandResolver from './command-path-resolver'
 
 const {
   handleMock,
@@ -12,6 +13,7 @@ const {
   getGiteaAuthStatusMock,
   resolveCliCommandsMock,
   isCommandOnLocalPathMock,
+  listLocalCommandPathsMock,
   mergePersistedWindowsPathAsyncMock,
   mergePersistedWindowsPathMock
 } = vi.hoisted(() => ({
@@ -26,6 +28,7 @@ const {
   getGiteaAuthStatusMock: vi.fn(),
   resolveCliCommandsMock: vi.fn(),
   isCommandOnLocalPathMock: vi.fn(),
+  listLocalCommandPathsMock: vi.fn(),
   mergePersistedWindowsPathAsyncMock: vi.fn(),
   mergePersistedWindowsPathMock: vi.fn()
 }))
@@ -63,8 +66,10 @@ vi.mock('../../shared/node-cli-command-resolution', () => ({
 // Why (#9297): local PATH resolution is now fs-based (no where/which spawn).
 // These tests express "which commands are on PATH" via the where/which mock,
 // so route the resolver through that same mock to preserve their intent.
-vi.mock('./command-path-resolver', () => ({
-  isCommandOnLocalPath: isCommandOnLocalPathMock
+vi.mock('./command-path-resolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof LocalCommandResolver>()),
+  isCommandOnLocalPath: isCommandOnLocalPathMock,
+  listLocalCommandPaths: listLocalCommandPathsMock
 }))
 
 vi.mock('../pty/windows-environment-path', () => ({
@@ -113,6 +118,7 @@ describe('preflight', () => {
         getGiteaAuthStatusMock,
         resolveCliCommandsMock,
         isCommandOnLocalPathMock,
+        listLocalCommandPathsMock,
         mergePersistedWindowsPathAsyncMock,
         mergePersistedWindowsPathMock
       },
@@ -135,13 +141,31 @@ describe('preflight', () => {
 
       const target = String(args[0])
       if (target === 'claude') {
-        return { environmentResolved: true, code: 0, stdout: '/Users/test/.local/bin/claude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Users/test/.local/bin/claude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       if (target === 'continue') {
-        return { environmentResolved: true, code: 0, stdout: 'continue: shell built-in command\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: 'continue: shell built-in command\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       if (target === 'cursor-agent') {
-        return { environmentResolved: true, code: 0, stdout: '/Users/test/.local/bin/cursor-agent\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Users/test/.local/bin/cursor-agent\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -155,7 +179,13 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'orca') {
-        return { environmentResolved: true, code: 0, stdout: '/Applications/Orca.app/Contents/MacOS/orca\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Applications/Orca.app/Contents/MacOS/orca\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -169,10 +199,22 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'claude') {
-        return { environmentResolved: true, code: 0, stdout: '/Users/test/.local/bin/claude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Users/test/.local/bin/claude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       if (String(args[0]) === 'orca') {
-        return { environmentResolved: true, code: 0, stdout: '/Applications/Orca.app/Contents/MacOS/orca\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Applications/Orca.app/Contents/MacOS/orca\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -190,10 +232,22 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'claude') {
-        return { environmentResolved: true, code: 0, stdout: '/mock/windows/npm/claude.cmd\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/mock/windows/npm/claude.cmd\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       if (String(args[0]) === 'orca') {
-        return { environmentResolved: true, code: 0, stdout: '/mock/windows/programs/orca.cmd\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/mock/windows/programs/orca.cmd\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -239,7 +293,13 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'claude') {
-        return { environmentResolved: true, code: 0, stdout: '/Users/test/.local/bin/claude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Users/test/.local/bin/claude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -273,10 +333,22 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'openclaude') {
-        return { environmentResolved: true, code: 0, stdout: '/Users/test/.local/bin/openclaude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Users/test/.local/bin/openclaude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       if (String(args[0]) === 'cursor-agent') {
-        return { environmentResolved: true, code: 0, stdout: '/Users/test/.local/bin/cursor-agent\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/Users/test/.local/bin/cursor-agent\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -303,7 +375,13 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'codex' && process.env.PATH?.startsWith('/home/test/.local/bin')) {
-        return { environmentResolved: true, code: 0, stdout: '/home/test/.local/bin/codex\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/home/test/.local/bin/codex\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -328,7 +406,13 @@ describe('preflight', () => {
     })
     runWslProcessMock.mockImplementation(async ({ script }: { script: string }) => {
       if (script.includes("'claude'")) {
-        return { environmentResolved: true, code: 0, stdout: '__ORCA_AGENT_PATH__claude\t/home/test/.local/bin/claude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '__ORCA_AGENT_PATH__claude\t/home/test/.local/bin/claude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -349,7 +433,13 @@ describe('preflight', () => {
       expect(script).not.toContain("'orca-dev'")
       expect(script).not.toContain("'orca-ide'")
       if (script.includes("'claude'")) {
-        return { environmentResolved: true, code: 0, stdout: '__ORCA_AGENT_PATH__claude\t/home/test/.local/bin/claude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '__ORCA_AGENT_PATH__claude\t/home/test/.local/bin/claude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -363,7 +453,13 @@ describe('preflight', () => {
         throw new Error(`unexpected command ${String(command)}`)
       }
       if (String(args[0]) === 'vibe') {
-        return { environmentResolved: true, code: 0, stdout: '/home/test/.local/bin/vibe\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '/home/test/.local/bin/vibe\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -392,7 +488,13 @@ describe('preflight', () => {
     })
     runWslProcessMock.mockImplementation(async ({ script }: { script: string }) => {
       if (script.includes("'claude'")) {
-        return { environmentResolved: true, code: 0, stdout: '__ORCA_AGENT_PATH__claude\t/home/test/.local/bin/claude\n', stderr: '', timedOut: false }
+        return {
+          environmentResolved: true,
+          code: 0,
+          stdout: '__ORCA_AGENT_PATH__claude\t/home/test/.local/bin/claude\n',
+          stderr: '',
+          timedOut: false
+        }
       }
       throw new Error('not found')
     })
@@ -405,7 +507,7 @@ describe('preflight', () => {
     // pinned by its own tests. What this suite owns is that detection asks the
     // right distro on the lane that carries the user's PATH.
     expect(runWslProcessMock).toHaveBeenCalledWith(
-      expect.objectContaining({ distro: 'Ubuntu', lane: 'probe' })
+      expect.objectContaining({ distro: 'Ubuntu', loginPath: 'preferred' })
     )
   })
 
@@ -433,7 +535,7 @@ describe('preflight', () => {
     expect(resolveCliCommandsMock).not.toHaveBeenCalled()
     // No distro named: the runner resolves the default.
     expect(runWslProcessMock).toHaveBeenCalledWith(
-      expect.objectContaining({ distro: undefined, lane: 'probe' })
+      expect.objectContaining({ distro: undefined, loginPath: 'preferred' })
     )
   })
 })

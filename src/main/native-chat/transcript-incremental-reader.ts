@@ -16,6 +16,16 @@ export type IncrementalTranscriptState = {
   droppingOversizedRecord: boolean
 }
 
+export function createIncrementalTranscriptState(): IncrementalTranscriptState {
+  return {
+    offset: 0,
+    pendingChunks: [],
+    pendingStart: 0,
+    pendingBytes: 0,
+    droppingOversizedRecord: false
+  }
+}
+
 export function resetIncrementalTranscriptState(state: IncrementalTranscriptState): void {
   state.offset = 0
   state.pendingChunks.length = 0
@@ -93,7 +103,10 @@ export async function readIncrementalTranscriptMessages(
   }
 
   function decodeLine(): void {
-    let line = Buffer.concat(state.pendingChunks).toString('utf8')
+    // These owned bytes are decoded synchronously; a single part needs no copy.
+    const bytes =
+      state.pendingChunks.length === 1 ? state.pendingChunks[0] : Buffer.concat(state.pendingChunks)
+    let line = bytes.toString('utf8')
     if (line.endsWith('\r')) {
       line = line.slice(0, -1)
     }
