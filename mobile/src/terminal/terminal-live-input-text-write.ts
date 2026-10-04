@@ -6,6 +6,17 @@ import type { TextInput } from 'react-native'
  * `value` prop leaves whatever an interrupted IME composition put there. The `.web.ts` sibling
  * exists because on RN Web the ref is the DOM node, where this call is a `TypeError`.
  */
-export function writeTerminalLiveInputText(ref: RefObject<TextInput | null>, text: string): void {
-  ref.current?.setNativeProps({ text })
+export function writeTerminalLiveInputText(
+  ref: RefObject<TextInput | null>,
+  text: string,
+  caret?: number
+): void {
+  ref.current?.setNativeProps(
+    caret === undefined ? { text } : { text, selection: { start: caret, end: caret } }
+  )
+}
+
+/** Moves the caret alone, in UTF-16 units; the text is left exactly as the field holds it. */
+export function writeTerminalLiveInputCaret(ref: RefObject<TextInput | null>, caret: number): void {
+  ref.current?.setNativeProps({ selection: { start: caret, end: caret } })
 }

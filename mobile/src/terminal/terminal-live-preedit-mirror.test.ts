@@ -251,7 +251,8 @@ describe('terminal live preedit mirror with no marked-text report', () => {
       eraseCount: 3,
       appendText: '',
       nextSentText: '',
-      heldText: ''
+      heldText: '',
+      caretBack: 0
     })
     expect(buildTerminalLiveMirrorPayload(step)).toBe('\x7f\x7f\x7f')
   })
@@ -298,7 +299,8 @@ describe('terminal live preedit mirror with no marked-text report', () => {
       eraseCount: 0,
       appendText: '',
       nextSentText: '',
-      heldText: ''
+      heldText: '',
+      caretBack: 0
     })
   })
 })

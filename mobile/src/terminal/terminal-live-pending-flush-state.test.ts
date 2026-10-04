@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { sendTerminalLiveControlAfterPendingFlush } from './terminal-live-control-send-order'
 import {
+  buildTerminalLiveMirrorEditPayload,
+  composeTerminalLiveMirrorEdits,
   cancelTerminalLivePendingFlush,
   createTerminalLivePendingFlushState,
   queueTerminalLiveMirrorSend,
@@ -254,5 +256,26 @@ describe('terminal live mirror send queue', () => {
     await expect(Promise.all([active, pending])).resolves.toEqual([false, false])
     expect(state.current).toBeNull()
     resolveSend(true)
+  })
+})
+
+describe('terminal live mirror edits with the cursor inside the line', () => {
+  it('walks to the end, edits, and walks back to the caret', () => {
+    expect(
+      buildTerminalLiveMirrorEditPayload({
+        eraseCount: 1,
+        appendText: '你”',
+        fromCaretBack: 1,
+        toCaretBack: 1
+      })
+    ).toBe('\x1b[C\x7f你”\x1b[D')
+  })
+
+  it('composes two edits into one round trip from the first caret to the last', () => {
+    const composed = composeTerminalLiveMirrorEdits(
+      { eraseCount: 1, appendText: '你”', fromCaretBack: 1, toCaretBack: 1 },
+      { eraseCount: 1, appendText: '好”', fromCaretBack: 1, toCaretBack: 1 }
+    )
+    expect(buildTerminalLiveMirrorEditPayload(composed)).toBe('\x1b[C\x7f你好”\x1b[D')
   })
 })

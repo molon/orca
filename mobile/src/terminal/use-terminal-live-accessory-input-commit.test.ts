@@ -58,6 +58,8 @@ function createAccessoryInputCommitHarness({
   const activeHandle = 'terminal-a'
   const heldLiveInputTextRef: RefObject<string> = { current: heldText }
   const liveInputComposingRef: RefObject<boolean | undefined> = { current: composing }
+  const fieldTextRef: RefObject<string> = { current: sentText + heldText }
+  const fieldCaretBackRef: RefObject<number> = { current: 0 }
   const sentLiveInputTextRef: RefObject<string> = { current: sentText }
   const pendingLiveInputHandleRef: RefObject<string | null> = { current: pendingHandle }
   const liveInputRef: RefObject<TextInput | null> = { current: null }
@@ -86,6 +88,8 @@ function createAccessoryInputCommitHarness({
       clearPendingLiveInputCommit,
       flushPendingLiveInputText,
       heldLiveInputTextRef,
+      fieldTextRef,
+      fieldCaretBackRef,
       liveInputComposingRef,
       liveInputRef,
       liveInputTerminalHandles,
@@ -250,9 +254,11 @@ describe('terminal live accessory input commit hook', () => {
     const result = await harness.commit({ bytes: '\x7f', localEdit: 'backspace' })
 
     // Then
-    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', 'ni ha', {
-      composing: true
-    })
+    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith(
+      'terminal-a',
+      'ni ha',
+      expect.objectContaining({ composing: true })
+    )
     expect(result).toEqual({ kind: 'handled' })
     expect(harness.sent).toEqual([])
   })
@@ -269,9 +275,11 @@ describe('terminal live accessory input commit hook', () => {
     const result = await harness.commit({ bytes: '\x7f', localEdit: 'backspace' })
 
     // Then
-    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', '한', {
-      composing: undefined
-    })
+    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith(
+      'terminal-a',
+      '한',
+      expect.objectContaining({ composing: undefined })
+    )
     expect(result).toEqual({ kind: 'handled' })
   })
 
@@ -288,9 +296,11 @@ describe('terminal live accessory input commit hook', () => {
     const result = await harness.commit({ bytes: '\x7f', localEdit: 'backspace' })
 
     // Then
-    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith('terminal-a', 'a', {
-      composing: false
-    })
+    expect(harness.applyLiveInputMirror).toHaveBeenCalledWith(
+      'terminal-a',
+      'a',
+      expect.objectContaining({ composing: false })
+    )
     expect(result).toEqual({ kind: 'handled' })
   })
 })

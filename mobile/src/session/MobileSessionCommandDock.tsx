@@ -42,6 +42,7 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
     bindCommandField,
     handleLiveInputChange,
     handleLiveInputKeyPress,
+    handleLiveInputSelectionChange,
     bindLiveInputField,
     submitLiveInput,
     canSend,
@@ -303,6 +304,7 @@ export function MobileSessionCommandDock({ controller }: { controller: MobileSes
               // arrives with native events in flight, stranding JS with a field it thinks it emptied.
               onChange={handleLiveInputChange}
               onKeyPress={handleLiveInputKeyPress}
+              onSelectionChange={handleLiveInputSelectionChange}
               onSubmitEditing={submitLiveInput}
               placeholder=""
               showSoftInputOnFocus

@@ -116,6 +116,7 @@ export function useMobileSessionTerminalRuntime(scope: MobileSessionScreenStateM
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
+    handleLiveInputSelectionChange,
     handleLiveInputSubmit,
     restoreLiveInputLine
   } = useTerminalLiveInputCommit({
@@ -205,6 +206,7 @@ export function useMobileSessionTerminalRuntime(scope: MobileSessionScreenStateM
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
+    handleLiveInputSelectionChange,
     handleLiveInputSubmit,
     restoreLiveInputLine,
     canCompose,

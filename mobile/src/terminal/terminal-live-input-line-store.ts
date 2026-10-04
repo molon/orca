@@ -15,20 +15,25 @@ track of what reached the pty.
  *  app accumulating handles that closed without notice. */
 const MAX_REMEMBERED_LINES = 64
 
-const lines = new Map<string, string>()
+/** The line, and how many code points its cursor sits before the end. */
+const lines = new Map<string, { readonly text: string; readonly caretBack: number }>()
 
 export function readTerminalLiveInputLine(handle: string): string {
-  return lines.get(handle) ?? ''
+  return lines.get(handle)?.text ?? ''
 }
 
-export function writeTerminalLiveInputLine(handle: string, text: string): void {
+export function readTerminalLiveInputLineCaretBack(handle: string): number {
+  return lines.get(handle)?.caretBack ?? 0
+}
+
+export function writeTerminalLiveInputLine(handle: string, text: string, caretBack = 0): void {
   if (text.length === 0) {
     lines.delete(handle)
     return
   }
   // Re-insert so eviction below drops the least recently typed into.
   lines.delete(handle)
-  lines.set(handle, text)
+  lines.set(handle, { text, caretBack })
   for (const stale of [...lines.keys()].slice(0, Math.max(0, lines.size - MAX_REMEMBERED_LINES))) {
     lines.delete(stale)
   }

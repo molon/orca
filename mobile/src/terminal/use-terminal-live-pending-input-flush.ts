@@ -1,5 +1,7 @@
 import { logTerminalLiveness } from './terminal-liveness-log'
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import type { TextInput } from 'react-native'
+import { writeTerminalLiveInputCaret } from './terminal-live-input-text-write'
 import type { TerminalLiveInputSender } from './terminal-live-input-sender'
 import {
   computeTerminalLiveMirrorStep,
@@ -8,6 +10,7 @@ import {
 import {
   forgetTerminalLiveInputLine,
   readTerminalLiveInputLine,
+  readTerminalLiveInputLineCaretBack,
   writeTerminalLiveInputLine
 } from './terminal-live-input-line-store'
 import {
@@ -20,6 +23,7 @@ import {
 type TerminalLivePendingInputFlushOptions<TTabType extends string> = {
   readonly activeHandleRef: RefObject<string | null>
   readonly activeSessionTabTypeRef: RefObject<TTabType | null>
+  readonly liveInputRef: RefObject<TextInput | null>
   readonly liveInputTerminalHandlesRef: RefObject<Set<string>>
   readonly sendLiveTerminalInputRef: RefObject<TerminalLiveInputSender>
   readonly setLiveInputCapture: (text: string) => void
@@ -28,6 +32,10 @@ type TerminalLivePendingInputFlushOptions<TTabType extends string> = {
 type TerminalLiveFieldReport = {
   readonly composing?: boolean
   readonly dictating?: boolean
+  /** Code points after the caret; absent keeps the last one, which typing at the caret preserves. */
+  readonly caretBack?: number
+  /** The raw field's UTF-16 length, which is what a caret write is measured in. */
+  readonly fieldLength?: number
 }
 
 type RunTerminalLiveMirrorStep = (
@@ -49,6 +57,8 @@ type TerminalLivePendingInputFlush = {
   readonly parkLiveInputLine: () => void
   readonly readLiveInputLine: (handle: string) => string
   readonly heldLiveInputTextRef: RefObject<string>
+  readonly fieldTextRef: RefObject<string>
+  readonly fieldCaretBackRef: RefObject<number>
   readonly liveInputComposingRef: RefObject<boolean | undefined>
   readonly mirroredFieldTextRef: RefObject<string>
   readonly pendingLiveInputHandleRef: RefObject<string | null>
@@ -58,6 +68,7 @@ type TerminalLivePendingInputFlush = {
 export function useTerminalLivePendingInputFlush<TTabType extends string>({
   activeHandleRef,
   activeSessionTabTypeRef,
+  liveInputRef,
   liveInputTerminalHandlesRef,
   sendLiveTerminalInputRef,
   setLiveInputCapture
@@ -76,6 +87,10 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
    * re-send a whole sentence or erase one.
    */
   const mirroredFieldTextRef = useRef('')
+  /** The whole field as last reported, preedit included, and where its caret sits from the end. */
+  const fieldTextRef = useRef('')
+  const fieldCaretBackRef = useRef(0)
+  const fieldLengthRef = useRef(0)
   const pendingLiveInputHandleRef = useRef<string | null>(null)
   const runMirrorStepRef = useRef<RunTerminalLiveMirrorStep>(async () => false)
 
@@ -99,7 +114,12 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     liveInputComposingRef.current = undefined
     pendingLiveInputHandleRef.current = null
     setLiveInputCapture('')
-  }, [clearHeldCommitTimer, setLiveInputCapture])
+    // A caret left inside the old text would have the next line typed into the middle of it.
+    if (fieldCaretBackRef.current > 0) {
+      fieldCaretBackRef.current = 0
+      writeTerminalLiveInputCaret(liveInputRef, fieldLengthRef.current)
+    }
+  }, [clearHeldCommitTimer, liveInputRef, setLiveInputCapture])
 
   /** Leaving the tab, not losing the line: the sentence is still sitting in that
    *  terminal's prompt, so only the in-flight machinery stands down. */
@@ -164,10 +184,14 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
         return false
       }
 
+      fieldTextRef.current = fieldText
+      fieldCaretBackRef.current = report?.caretBack ?? fieldCaretBackRef.current
+      fieldLengthRef.current = report?.fieldLength ?? fieldLengthRef.current
       const step = computeTerminalLiveMirrorStep(mirroredFieldTextRef.current, fieldText, {
         commitHeld,
         composing: report?.composing,
-        dictating: report?.dictating
+        dictating: report?.dictating,
+        caretBack: fieldCaretBackRef.current
       })
       mirroredFieldTextRef.current = step.nextSentText
       heldLiveInputTextRef.current = step.heldText
@@ -176,14 +200,22 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
       // The field outlives the line, so an edit near its start can ask for more
       // erases than the line has characters. Spend only what is there.
       const lineCodePoints = Array.from(readTerminalLiveInputLine(handle))
+      const fromCaretBack = readTerminalLiveInputLineCaretBack(handle)
       const eraseCount = Math.min(step.eraseCount, lineCodePoints.length)
-      const nextLineText =
-        lineCodePoints.slice(0, lineCodePoints.length - eraseCount).join('') + step.appendText
-      writeTerminalLiveInputLine(handle, nextLineText)
+      const nextLine = [
+        ...lineCodePoints.slice(0, lineCodePoints.length - eraseCount),
+        ...step.appendText
+      ]
+      const toCaretBack = Math.min(step.caretBack, nextLine.length)
+      const nextLineText = nextLine.join('')
+      writeTerminalLiveInputLine(handle, nextLineText, toCaretBack)
       // The status row shows the line, not the field: the field still carries
       // sentences the terminal already ran, and showing those reads as if they
       // came back.
-      setLiveInputCapture(nextLineText + step.heldText)
+      const caretAt = nextLine.length - toCaretBack
+      setLiveInputCapture(
+        nextLine.slice(0, caretAt).join('') + step.heldText + nextLine.slice(caretAt).join('')
+      )
 
       pendingLiveInputHandleRef.current =
         step.heldText.length > 0 || nextLineText.length > 0 ? handle : null
@@ -195,18 +227,17 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
       if (step.heldText.length > 0 && report?.composing === undefined) {
         heldCommitTimerRef.current = setTimeout(() => {
           heldCommitTimerRef.current = null
-          const heldField = mirroredFieldTextRef.current + heldLiveInputTextRef.current
-          void runMirrorStepRef.current(handle, heldField, true)
+          void runMirrorStepRef.current(handle, fieldTextRef.current, true)
         }, TERMINAL_LIVE_HELD_PREEDIT_COMMIT_DELAY_MS)
       }
 
-      if (eraseCount === 0 && step.appendText.length === 0) {
+      if (eraseCount === 0 && step.appendText.length === 0 && fromCaretBack === toCaretBack) {
         return waitForPendingLiveInputFlush()
       }
       return queueTerminalLiveMirrorSend(
         pendingLiveInputFlushRef.current,
         handle,
-        { eraseCount, appendText: step.appendText },
+        { eraseCount, appendText: step.appendText, fromCaretBack, toCaretBack },
         sendQueuedMirrorPayload
       )
     },
@@ -246,7 +277,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
       const heldText = heldLiveInputTextRef.current
       const result =
         heldText.length > 0
-          ? await runMirrorStep(handle, mirroredFieldTextRef.current + heldText, true)
+          ? await runMirrorStep(handle, fieldTextRef.current, true)
           : await waitForPendingLiveInputFlush()
 
       // Why: an explicit flush ends the line — the echoed pty text stays and the
@@ -281,6 +312,8 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     parkLiveInputLine,
     readLiveInputLine,
     heldLiveInputTextRef,
+    fieldTextRef,
+    fieldCaretBackRef,
     liveInputComposingRef,
     mirroredFieldTextRef,
     pendingLiveInputHandleRef,

@@ -1,9 +1,16 @@
 type TerminalLiveMirrorSender = (handle: string, payload: string) => Promise<boolean>
 
-/** An edit to the terminal's input line: drop this many trailing code points, then type this. */
+/**
+ * An edit to the terminal's input line: step the cursor to the end, drop this many trailing code
+ * points, type this, then step the cursor back to where the field's caret sits.
+ */
 export type TerminalLiveMirrorEdit = {
   readonly eraseCount: number
   readonly appendText: string
+  /** Code points the cursor sits before the line's end when the edit starts. */
+  readonly fromCaretBack?: number
+  /** Code points it should sit before the end once the edit is done. */
+  readonly toCaretBack?: number
 }
 
 type TerminalLivePendingRequest = {
@@ -37,12 +44,23 @@ export function composeTerminalLiveMirrorEdits(
   const fromAppended = Math.min(second.eraseCount, appended.length)
   return {
     eraseCount: first.eraseCount + (second.eraseCount - fromAppended),
-    appendText: appended.slice(0, appended.length - fromAppended).join('') + second.appendText
+    appendText: appended.slice(0, appended.length - fromAppended).join('') + second.appendText,
+    // The first edit's return trip and the second's walk to the end cancel out.
+    fromCaretBack: first.fromCaretBack,
+    toCaretBack: second.toCaretBack
   }
 }
 
+const CURSOR_RIGHT = '\x1b[C'
+const CURSOR_LEFT = '\x1b[D'
+
 export function buildTerminalLiveMirrorEditPayload(edit: TerminalLiveMirrorEdit): string {
-  return TERMINAL_DEL_BYTE.repeat(edit.eraseCount) + edit.appendText
+  return (
+    CURSOR_RIGHT.repeat(edit.fromCaretBack ?? 0) +
+    TERMINAL_DEL_BYTE.repeat(edit.eraseCount) +
+    edit.appendText +
+    CURSOR_LEFT.repeat(edit.toCaretBack ?? 0)
+  )
 }
 
 export type TerminalLivePendingFlushState = {

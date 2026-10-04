@@ -31,6 +31,16 @@ type TerminalLiveInputChangeEvent = {
   }
 }
 
+/** The caret the field reports after it moves; `text` rides along on the native event. */
+type TerminalLiveInputSelectionChangeEvent = {
+  readonly nativeEvent: {
+    readonly text?: string
+    readonly selection: { readonly start: number; readonly end: number }
+    readonly isComposing?: boolean
+    readonly isDictating?: boolean
+  }
+}
+
 type TerminalLiveInputCommitOptions<TTabType extends string> = {
   readonly activeHandle: string | null
   readonly activeHandleRef: RefObject<string | null>
@@ -53,6 +63,7 @@ type TerminalLiveInputCommitHandlers = {
   ) => Promise<TerminalLiveAccessoryInputCommitResult>
   readonly handleLiveInputChange: (event: TerminalLiveInputChangeEvent) => void
   readonly handleLiveInputKeyPress: (event: TerminalLiveInputKeyPressEvent) => void
+  readonly handleLiveInputSelectionChange: (event: TerminalLiveInputSelectionChangeEvent) => void
   readonly handleLiveInputSubmit: () => Promise<boolean>
   /** Puts the remembered line back in the field after an in-place recovery,
    *  which repairs the pane without ever changing the active handle. */
@@ -83,6 +94,8 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     parkLiveInputLine,
     readLiveInputLine,
     heldLiveInputTextRef,
+    fieldTextRef,
+    fieldCaretBackRef,
     liveInputComposingRef,
     mirroredFieldTextRef,
     pendingLiveInputHandleRef,
@@ -90,6 +103,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
   } = useTerminalLivePendingInputFlush({
     activeHandleRef,
     activeSessionTabTypeRef,
+    liveInputRef,
     liveInputTerminalHandlesRef,
     sendLiveTerminalInputRef,
     setLiveInputCapture
@@ -183,7 +197,8 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       advanceLiveInputInteractionGeneration()
       void applyLiveInputMirror(activeHandle, normalizeTerminalTextInput(nativeEvent.text), {
         composing: reportedLiveInputComposing(nativeEvent.isComposing),
-        dictating: nativeEvent.isDictating
+        dictating: nativeEvent.isDictating,
+        fieldLength: nativeEvent.text.length
       })
     },
     [
@@ -193,6 +208,28 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
       clearPendingLiveInputCommit,
       liveInputTerminalHandles
     ]
+  )
+
+  // An input method that pairs punctuation inserts both halves, then moves the caret between them
+  // with no text change; this is the only report of that move.
+  const handleLiveInputSelectionChange = useCallback(
+    ({ nativeEvent }: TerminalLiveInputSelectionChangeEvent) => {
+      const { text, selection } = nativeEvent
+      if (
+        !activeHandle ||
+        !liveInputTerminalHandles.has(activeHandle) ||
+        typeof text !== 'string'
+      ) {
+        return
+      }
+      void applyLiveInputMirror(activeHandle, normalizeTerminalTextInput(text), {
+        composing: reportedLiveInputComposing(nativeEvent.isComposing),
+        dictating: nativeEvent.isDictating,
+        caretBack: Array.from(normalizeTerminalTextInput(text.slice(selection.end))).length,
+        fieldLength: text.length
+      })
+    },
+    [activeHandle, applyLiveInputMirror, liveInputTerminalHandles]
   )
 
   const getLiveInputInteractionGeneration = useCallback(
@@ -251,6 +288,8 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     clearPendingLiveInputCommit,
     flushPendingLiveInputText,
     heldLiveInputTextRef,
+    fieldTextRef,
+    fieldCaretBackRef,
     liveInputComposingRef,
     liveInputRef,
     liveInputTerminalHandles,
@@ -285,6 +324,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     handleLiveInputAccessoryBytes,
     handleLiveInputChange,
     handleLiveInputKeyPress,
+    handleLiveInputSelectionChange,
     handleLiveInputSubmit,
     restoreLiveInputLine
   }

@@ -26,11 +26,17 @@ type TerminalLiveAccessoryInputCommitOptions = {
   readonly applyLiveInputMirror: (
     handle: string,
     fieldText: string,
-    report?: { readonly composing?: boolean }
+    report?: {
+      readonly composing?: boolean
+      readonly caretBack?: number
+      readonly fieldLength?: number
+    }
   ) => Promise<boolean>
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputText: (expectedHandle: string | null) => Promise<boolean>
   readonly heldLiveInputTextRef: RefObject<string>
+  readonly fieldTextRef: RefObject<string>
+  readonly fieldCaretBackRef: RefObject<number>
   readonly liveInputComposingRef: RefObject<boolean | undefined>
   readonly liveInputRef: RefObject<TextInput | null>
   readonly liveInputTerminalHandles: ReadonlySet<string>
@@ -47,6 +53,8 @@ export function useTerminalLiveAccessoryInputCommit({
   clearPendingLiveInputCommit,
   flushPendingLiveInputText,
   heldLiveInputTextRef,
+  fieldTextRef,
+  fieldCaretBackRef,
   liveInputComposingRef,
   liveInputRef,
   liveInputTerminalHandles,
@@ -86,18 +94,25 @@ export function useTerminalLiveAccessoryInputCommit({
           return ready ? { kind: 'allow-raw' } : { kind: 'suppress-raw' }
         }
         case 'local-edit': {
-          const editedText = getTerminalLiveAccessoryLocalEditText({
+          // The edit happens at the caret, which a paired-punctuation IME leaves before the closer.
+          const field = Array.from(ownsPendingState ? fieldTextRef.current : '')
+          const caretAt = field.length - Math.min(fieldCaretBackRef.current, field.length)
+          const afterCaret = field.slice(caretAt).join('')
+          const editedBefore = getTerminalLiveAccessoryLocalEditText({
             localEdit: decision.localEdit,
-            fieldText: sentText + heldText
+            fieldText: field.slice(0, caretAt).join('')
           })
+          const editedText = editedBefore + afterCaret
           // Why: accessory buttons do not emit native TextInput edits, so the
           // field is edited here and the mirror diff syncs the PTY echo. This is
           // the one write left, and it happens on a tap rather than mid
           // dictation; if iOS drops it, the next report diffs it back.
-          writeTerminalLiveInputText(liveInputRef, editedText)
+          writeTerminalLiveInputText(liveInputRef, editedText, editedBefore.length)
           // Preserve undefined so Android's heuristic hold still settles on its timer.
           const sent = await applyLiveInputMirror(activeHandle, editedText, {
-            composing: liveInputComposingRef.current
+            composing: liveInputComposingRef.current,
+            caretBack: Array.from(afterCaret).length,
+            fieldLength: editedText.length
           })
           return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
         }
@@ -119,6 +134,8 @@ export function useTerminalLiveAccessoryInputCommit({
       clearPendingLiveInputCommit,
       flushPendingLiveInputText,
       heldLiveInputTextRef,
+      fieldTextRef,
+      fieldCaretBackRef,
       liveInputComposingRef,
       liveInputRef,
       liveInputTerminalHandles,

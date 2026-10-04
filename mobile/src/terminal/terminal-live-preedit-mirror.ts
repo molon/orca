@@ -11,6 +11,8 @@ export type TerminalLiveMirrorStep = {
   readonly appendText: string
   readonly nextSentText: string
   readonly heldText: string
+  /** Code points of the sent text after the field's caret: where the terminal cursor belongs. */
+  readonly caretBack: number
 }
 
 /**
@@ -71,22 +73,35 @@ export function computeTerminalLiveMirrorStep(
     readonly commitHeld: boolean
     readonly composing?: boolean
     readonly dictating?: boolean
+    /** Code points after the field's caret; a paired-punctuation IME leaves the closer there. */
+    readonly caretBack?: number
   }
 ): TerminalLiveMirrorStep {
   const fieldCodePoints = Array.from(fieldText)
   const sentCodePoints = Array.from(sentText)
+  const caretAt = fieldCodePoints.length - Math.min(options.caretBack ?? 0, fieldCodePoints.length)
   const stableLength = commonPrefixLength(sentCodePoints, fieldCodePoints)
+  // The marked range ends at the caret, so preedit is held from there back, never past it.
   const heldLength = options.commitHeld
     ? 0
-    : heldPreeditLength(fieldCodePoints, stableLength, options.composing, options.dictating)
-  const targetCodePoints = fieldCodePoints.slice(0, fieldCodePoints.length - heldLength)
-  const keptLength = Math.min(stableLength, targetCodePoints.length)
+    : heldPreeditLength(
+        fieldCodePoints.slice(0, caretAt),
+        Math.min(stableLength, caretAt),
+        options.composing,
+        options.dictating
+      )
+  const targetCodePoints = [
+    ...fieldCodePoints.slice(0, caretAt - heldLength),
+    ...fieldCodePoints.slice(caretAt)
+  ]
+  const keptLength = commonPrefixLength(sentCodePoints, targetCodePoints)
 
   return {
     eraseCount: sentCodePoints.length - keptLength,
     appendText: targetCodePoints.slice(keptLength).join(''),
     nextSentText: targetCodePoints.join(''),
-    heldText: fieldCodePoints.slice(fieldCodePoints.length - heldLength).join('')
+    heldText: fieldCodePoints.slice(caretAt - heldLength, caretAt).join(''),
+    caretBack: fieldCodePoints.length - caretAt
   }
 }
 
