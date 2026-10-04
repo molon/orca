@@ -82,6 +82,7 @@
       "expo-notifications",
       "./plugins/android-respect-rotation-lock.js",
       "./plugins/aps-environment.js",
+      "./plugins/ios-pod-deployment-target.js",
       [
         "./plugins/notification-service-extension",
         {
@@ -113,7 +114,8 @@
         "expo-build-properties",
         {
           "ios": {
-            "buildReactNativeFromSource": true
+            "buildReactNativeFromSource": true,
+            "deploymentTarget": "16.0"
           },
           "android": {
             "usesCleartextTraffic": true
