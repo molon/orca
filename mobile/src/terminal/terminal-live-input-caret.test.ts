@@ -61,11 +61,11 @@ function createHarness() {
   const sends: string[] = []
   const selectionWrites: number[] = []
   const liveInputRef = {
+    // Only the view command moves a Fabric caret; a `selection` native prop is dropped.
     current: {
-      setNativeProps: (props: { selection?: { start: number; end: number } }) => {
-        if (props.selection) {
-          selectionWrites.push(props.selection.end)
-        }
+      setNativeProps: () => {},
+      setSelection: (_start: number, end: number) => {
+        selectionWrites.push(end)
       }
     }
   } as unknown as RefObject<TextInput | null>

@@ -11,12 +11,17 @@ export function writeTerminalLiveInputText(
   text: string,
   caret?: number
 ): void {
-  ref.current?.setNativeProps(
-    caret === undefined ? { text } : { text, selection: { start: caret, end: caret } }
-  )
+  ref.current?.setNativeProps({ text })
+  if (caret !== undefined) {
+    writeTerminalLiveInputCaret(ref, caret)
+  }
 }
 
-/** Moves the caret alone, in UTF-16 units; the text is left exactly as the field holds it. */
+/**
+ * Moves the caret alone, in UTF-16 units; the text is left exactly as the field holds it.
+ * `setSelection`, not `setNativeProps`: Fabric's TextInput has no `selection` prop, so that write is
+ * silently dropped and only the view command reaches the native field.
+ */
 export function writeTerminalLiveInputCaret(ref: RefObject<TextInput | null>, caret: number): void {
-  ref.current?.setNativeProps({ selection: { start: caret, end: caret } })
+  ref.current?.setSelection(caret, caret)
 }
