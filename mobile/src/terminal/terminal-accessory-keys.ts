@@ -173,8 +173,9 @@ function buildShortcutBytes(key: string, modifiers: TerminalShortcutModifier[]):
     return modifiers.includes('alt') ? `${ESC}${bytes}` : bytes
   }
   if (key === 'enter') {
+    // Shift as well as Alt: a bare CR submits, and Shift+Enter is asked for to insert a newline.
     const bytes = '\r'
-    return modifiers.includes('alt') ? `${ESC}${bytes}` : bytes
+    return modifiers.includes('alt') || modifiers.includes('shift') ? `${ESC}${bytes}` : bytes
   }
   if (key === 'backspace') {
     const bytes = modifiers.includes('ctrl') ? '\b' : '\x7f'

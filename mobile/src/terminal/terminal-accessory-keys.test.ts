@@ -23,6 +23,19 @@ describe('TERMINAL_ACCESSORY_KEYS', () => {
     })
   })
 
+  // ESC CR, the same newline the desktop sends for Shift+Enter without kitty keyboard negotiation.
+  it('offers Shift+Enter right after Enter, inserting a newline instead of submitting', () => {
+    const ids = TERMINAL_ACCESSORY_KEYS.map((key) => key.id)
+
+    expect(TERMINAL_ACCESSORY_KEYS.find((candidate) => candidate.id === 'shiftEnter')).toEqual({
+      id: 'shiftEnter',
+      label: 'Shift+Enter',
+      bytes: '\x1b\r',
+      accessibilityLabel: 'New line'
+    })
+    expect(ids.indexOf('shiftEnter')).toBe(ids.indexOf('enter') + 1)
+  })
+
   it('includes a non-repeatable Space default key near the primary editing keys', () => {
     const ids = TERMINAL_ACCESSORY_KEYS.map((key) => key.id)
 
@@ -111,6 +124,8 @@ describe('TERMINAL_ACCESSORY_KEYS', () => {
       bytes: '\r',
       accessibilityLabel: 'Enter'
     })
+    // A plain CR here submitted the line, which is what a custom Shift+Enter did.
+    expect(buildTerminalShortcutKey({ key: 'enter', modifiers: ['shift'] })?.bytes).toBe('\x1b\r')
     expect(buildTerminalShortcutKey({ key: 'arrowRight', modifiers: ['ctrl', 'shift'] })).toEqual({
       label: 'Ctrl+Shift+→',
       bytes: '\x1b[1;6C',
