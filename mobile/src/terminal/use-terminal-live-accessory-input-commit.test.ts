@@ -94,6 +94,7 @@ function createAccessoryInputCommitHarness({
       liveInputRef,
       liveInputTerminalHandles,
       onInteraction: vi.fn(),
+      releaseLiveInputCaret: vi.fn(),
       pendingLiveInputHandleRef,
       mirroredFieldTextRef: sentLiveInputTextRef,
       sendLiveTerminalInputRef,

@@ -77,6 +77,7 @@ export function sessionTerminalGestureMountAdapters(
             clearPendingLiveInputCommit: () => {},
             toggleTerminalLiveInput: () => false,
             getTerminalRef: () => undefined,
+            releaseLiveInputCaret: () => {},
             showToast: (message: string, durationMs?: number) =>
               effect('toast', { message, durationMs: durationMs ?? null })
           })

@@ -41,6 +41,7 @@ type TerminalLiveAccessoryInputCommitOptions = {
   readonly liveInputRef: RefObject<TextInput | null>
   readonly liveInputTerminalHandles: ReadonlySet<string>
   readonly onInteraction: () => void
+  readonly releaseLiveInputCaret: () => void
   readonly pendingLiveInputHandleRef: RefObject<string | null>
   readonly mirroredFieldTextRef: RefObject<string>
   readonly sendLiveTerminalInputRef: RefObject<TerminalLiveInputSender>
@@ -59,6 +60,7 @@ export function useTerminalLiveAccessoryInputCommit({
   liveInputRef,
   liveInputTerminalHandles,
   onInteraction,
+  releaseLiveInputCaret,
   pendingLiveInputHandleRef,
   mirroredFieldTextRef,
   sendLiveTerminalInputRef,
@@ -84,6 +86,7 @@ export function useTerminalLiveAccessoryInputCommit({
       const decision = getTerminalLiveAccessoryBytesDecision({ ...input, heldText, sentText })
       switch (decision.kind) {
         case 'send-now': {
+          releaseLiveInputCaret()
           // Why: raw accessory bytes must wait behind any in-flight mirror send
           // so composed Hangul reaches the PTY before follow-up controls. A control
           // that ends the line ends the line state with the same call the
@@ -117,6 +120,7 @@ export function useTerminalLiveAccessoryInputCommit({
           return sent ? { kind: 'handled' } : { kind: 'suppress-raw' }
         }
         case 'commit-held-then-send': {
+          releaseLiveInputCaret()
           const sent = await sendTerminalLiveControlAfterPendingFlush(
             () => flushPendingLiveInputText(activeHandle),
             () => sendLiveTerminalInputRef.current(activeHandle, decision.bytes)
@@ -140,6 +144,7 @@ export function useTerminalLiveAccessoryInputCommit({
       liveInputRef,
       liveInputTerminalHandles,
       onInteraction,
+      releaseLiveInputCaret,
       pendingLiveInputHandleRef,
       mirroredFieldTextRef,
       sendLiveTerminalInputRef,

@@ -58,6 +58,7 @@ function createHarness() {
   const handle = 'terminal-a'
   const handles = new Set([handle])
   const line = createTerminalLine()
+  const sends: string[] = []
   const selectionWrites: number[] = []
   const liveInputRef = {
     current: {
@@ -70,6 +71,7 @@ function createHarness() {
   } as unknown as RefObject<TextInput | null>
   const sendLiveTerminalInputRef: RefObject<TerminalLiveInputSender> = {
     current: async (_handle, bytes) => {
+      sends.push(bytes)
       line.apply(bytes)
       return true
     }
@@ -112,6 +114,17 @@ function createHarness() {
     submit: async () => {
       await act(async () => {
         await handlers?.handleLiveInputSubmit()
+      })
+    },
+    sends,
+    key: async (bytes: string) => {
+      await act(async () => {
+        await handlers?.handleLiveInputAccessoryBytes({ bytes })
+      })
+    },
+    release: () => {
+      act(() => {
+        handlers?.releaseLiveInputCaret()
       })
     },
     backspace: async () => {
@@ -171,5 +184,31 @@ describe('live input with the caret inside the field', () => {
     await h.select('“你”', 3)
     await h.change('“你”a')
     expect(h.line.view).toBe('a|')
+  })
+
+  // Esc, arrows, a click: the terminal's line and cursor are no longer the mirror's to place.
+  it('stops re-typing the closer once a key went to the terminal around the field', async () => {
+    const h = createHarness()
+    await h.change('“”')
+    await h.select('“”', 1)
+    await h.change('“abc”')
+    await h.key('\x1b')
+    expect(h.selectionWrites.at(-1)).toBe('“abc”'.length)
+    h.sends.length = 0
+    await h.select('“abc”', 5)
+    await h.change('“abc”x')
+    expect(h.sends).toEqual(['x'])
+  })
+
+  it('lets a click in the terminal take the cursor without the field pulling it back', async () => {
+    const h = createHarness()
+    await h.change('“”')
+    await h.select('“”', 1)
+    await h.change('“abc”')
+    h.release()
+    h.sends.length = 0
+    await h.select('“abc”', 5)
+    await h.change('“abc”x')
+    expect(h.sends).toEqual(['x'])
   })
 })

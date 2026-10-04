@@ -55,6 +55,7 @@ type TerminalLivePendingInputFlush = {
   readonly clearPendingLiveInputCommit: () => void
   readonly flushPendingLiveInputText: (expectedHandle: string | null) => Promise<boolean>
   readonly parkLiveInputLine: () => void
+  readonly releaseLiveInputCaret: () => void
   readonly readLiveInputLine: (handle: string) => string
   readonly heldLiveInputTextRef: RefObject<string>
   readonly fieldTextRef: RefObject<string>
@@ -120,6 +121,21 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
       writeTerminalLiveInputCaret(liveInputRef, fieldLengthRef.current)
     }
   }, [clearHeldCommitTimer, liveInputRef, setLiveInputCapture])
+
+  /** Input that reached the terminal around the field (Esc, arrows, a click) may have cleared the
+   *  line or moved its cursor, so the field's caret stops steering it: both go back to the end and
+   *  nothing after the old caret is re-typed. */
+  const releaseLiveInputCaret = useCallback(() => {
+    if (fieldCaretBackRef.current === 0) {
+      return
+    }
+    fieldCaretBackRef.current = 0
+    writeTerminalLiveInputCaret(liveInputRef, fieldLengthRef.current)
+    const handle = activeHandleRef.current
+    if (handle) {
+      writeTerminalLiveInputLine(handle, readTerminalLiveInputLine(handle), 0)
+    }
+  }, [activeHandleRef, liveInputRef])
 
   /** Leaving the tab, not losing the line: the sentence is still sitting in that
    *  terminal's prompt, so only the in-flight machinery stands down. */
@@ -311,6 +327,7 @@ export function useTerminalLivePendingInputFlush<TTabType extends string>({
     flushPendingLiveInputText,
     parkLiveInputLine,
     readLiveInputLine,
+    releaseLiveInputCaret,
     heldLiveInputTextRef,
     fieldTextRef,
     fieldCaretBackRef,

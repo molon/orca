@@ -51,7 +51,8 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
     initializedHandlesRef,
     unsubscribeTerminal,
     subscribeToTerminal,
-    restoreLiveInputLine
+    restoreLiveInputLine,
+    releaseLiveInputCaret
   } = scope
   const toggleLiveInput = useCallback(() => {
     if (!activeHandle) {
@@ -219,6 +220,8 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
       if (!allowTerminalGestureInput(handle, sequenceCount)) {
         return
       }
+      // A click can move the TUI's cursor; the live field's caret must stop steering it.
+      releaseLiveInputCaret()
       enqueueTerminalGestureInput(handle, bytes, sequenceCount)
     },
     [allowTerminalGestureInput, client, connState, enqueueTerminalGestureInput]

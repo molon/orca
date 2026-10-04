@@ -65,6 +65,8 @@ type TerminalLiveInputCommitHandlers = {
   readonly handleLiveInputKeyPress: (event: TerminalLiveInputKeyPressEvent) => void
   readonly handleLiveInputSelectionChange: (event: TerminalLiveInputSelectionChangeEvent) => void
   readonly handleLiveInputSubmit: () => Promise<boolean>
+  /** Called when input reaches the terminal some other way than this field. */
+  readonly releaseLiveInputCaret: () => void
   /** Puts the remembered line back in the field after an in-place recovery,
    *  which repairs the pane without ever changing the active handle. */
   readonly restoreLiveInputLine: () => void
@@ -93,6 +95,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     flushPendingLiveInputText,
     parkLiveInputLine,
     readLiveInputLine,
+    releaseLiveInputCaret,
     heldLiveInputTextRef,
     fieldTextRef,
     fieldCaretBackRef,
@@ -257,11 +260,13 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
         case 'local-edit':
           return
         case 'send-now':
+          releaseLiveInputCaret()
           void sendTerminalLiveControlAfterPendingFlush(waitForPendingLiveInputFlush, () =>
             sendLiveTerminalInputRef.current(activeHandle, decision.bytes)
           )
           return
         case 'commit-held-then-send':
+          releaseLiveInputCaret()
           void sendTerminalLiveControlAfterPendingFlush(
             () => flushPendingLiveInputText(activeHandle),
             () => sendLiveTerminalInputRef.current(activeHandle, decision.bytes)
@@ -294,6 +299,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     liveInputRef,
     liveInputTerminalHandles,
     onInteraction: advanceLiveInputInteractionGeneration,
+    releaseLiveInputCaret,
     pendingLiveInputHandleRef,
     mirroredFieldTextRef,
     sendLiveTerminalInputRef,
@@ -326,6 +332,7 @@ export function useTerminalLiveInputCommit<TTabType extends string>({
     handleLiveInputKeyPress,
     handleLiveInputSelectionChange,
     handleLiveInputSubmit,
+    releaseLiveInputCaret,
     restoreLiveInputLine
   }
 }
