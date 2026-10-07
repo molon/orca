@@ -15,6 +15,13 @@ import { forgetRelayNodePtyRepairs, recoverRelayNodePtyForSpawn } from './ssh-re
 import type { TerminalUnavailableCause } from '../../shared/terminal-unavailable-cause'
 import { replayPendingSshPtyKills } from './ssh-pending-pty-kill-replay'
 import { sweepOrphanedRelayPtys } from './ssh-orphan-relay-pty-sweep'
+import {
+  clearPreviousRelayCensus,
+  isReattachHeldByPreviousRelay,
+  startPreviousRelayCensus
+} from './ssh-previous-relay-terminals'
+import { attachHeldPtyThroughPreviousRelay } from '../providers/ssh-pty-legacy-relay-delegation'
+import { createSshLegacyRelayRouter } from './ssh-legacy-relay-routing'
 import { SshChannelMultiplexer } from './ssh-channel-multiplexer'
 import { SshPtyProvider } from '../providers/ssh-pty-provider'
 import type { SshPtyAttachResult } from '../providers/ssh-pty-session-reattach'
@@ -26,6 +33,7 @@ import { SshFilesystemProvider } from '../providers/ssh-filesystem-provider'
 import { isMethodNotFoundError } from './ssh-filesystem-stream-reader'
 import { SshGitProvider } from '../providers/ssh-git-provider'
 import { selectOpenCodePluginSources } from '../agent-hooks/opencode-plugin-settings'
+import { bindRemoteClaudeInterruptReconciliation } from './ssh-agent-hook-interrupt-reconciliation'
 import { agentHookServer } from '../agent-hooks/server'
 import { isAgentStatusHooksEnabled } from '../agent-hooks/managed-agent-hook-controls'
 import {
@@ -94,7 +102,7 @@ import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import {
   findTerminalTabIdForLeaf,
   hasHostAuthoritativeTerminalMembership
-} from '../runtime/workspace-session-terminal-membership-authority'
+} from '../persistence/terminal-topology/terminal-topology-membership'
 import { DEFAULT_PTY_SOURCE_WINDOW_SU } from '../../shared/pty-source-credit-contract'
 import { PTY_CONSUMER_STALE_OWNER_RECOVERY_ERROR } from '../../shared/pty-consumer-session'
 import {
@@ -323,6 +331,7 @@ export class SshRelaySession {
   private abortController: AbortController | null = null
   private muxDisposeCleanup: (() => void) | null = null
   // Why: hold the notification-handler disposer so teardownProviders can release it on reconnect/shutdown (symmetric with muxDisposeCleanup).
+  private remoteInterruptCleanup: (() => void) | null = null
   private muxNotificationCleanup: (() => void) | null = null
   private pluginSettingsCleanup: (() => void) | null = null
   private pluginInstallRetryTimer: ReturnType<typeof setTimeout> | null = null
@@ -335,6 +344,7 @@ export class SshRelaySession {
   private _onReady: ((targetId: string) => void) | null = null
   private portScanner: PortScanner | null = null
   private currentConnection: SshConnection | null = null
+  private previousRelayCensus: ReturnType<typeof startPreviousRelayCensus> | undefined
   // Why: a self-driven repair reconnect must not silently re-negotiate the target's grace window.
   private lastGraceTimeSeconds: number | undefined = undefined
   private hostPlatform: RemoteHostPlatform | null = null
@@ -931,6 +941,7 @@ export class SshRelaySession {
     // Why here and not on reconnect: an explicit disconnect is user action, so the host earns a
     // fresh node-pty repair attempt. A reconnect must not, or the repair becomes a loop.
     forgetRelayNodePtyRepairs(this.targetId)
+    clearPreviousRelayCensus(this.targetId, this.previousRelayCensus)
     const recoveryRemoval = forgetSshPtyConsumerRecovery(
       this.targetId,
       this.ptyConsumerClientInstanceId,
@@ -1050,7 +1061,12 @@ export class SshRelaySession {
     isAttemptCurrent: () => boolean
   ): Promise<Awaited<ReturnType<typeof deployAndLaunchRelay>> | null> {
     try {
-      return await deployAndLaunchRelay(conn, undefined, graceTimeSeconds, this.targetId)
+      const deployed = await deployAndLaunchRelay(conn, undefined, graceTimeSeconds, this.targetId)
+      // Why gated: a superseded or disposed attempt would replace the current attempt's census.
+      if (isAttemptCurrent() && !this.isDisposed()) {
+        this.previousRelayCensus = startPreviousRelayCensus(conn, this.targetId, deployed)
+      }
+      return deployed
     } catch (err) {
       // Why system SSH is excluded: it has no ssh2 shell or SFTP channel to degrade onto.
       if (
@@ -1196,6 +1212,7 @@ export class SshRelaySession {
     ptyProvider.setTerminalUnavailableRecovery?.((cause) =>
       this.recoverRemoteTerminalRuntime(ptyProvider, cause)
     )
+    ptyProvider.setLegacyRelayRouting?.(this.createLegacyRelayRouter())
     const consumerOwnerState = this.activePtyConsumerOwner()
     if (consumerOwnerState) {
       ptyProvider.setPtyDeliveryPauseAdapter?.(({ id, providerGeneration: generation, paused }) => {
@@ -1308,6 +1325,29 @@ export class SshRelaySession {
     this.wireUpRemoteWorkspaceEvents(mux)
     void this.installManagedHooksOnRemote(mux, shouldContinue)
     return true
+  }
+
+  // Why not acceptPtyData: an earlier build's relay serves these panes without flow control.
+  private createLegacyRelayRouter(): ReturnType<typeof createSshLegacyRelayRouter> {
+    return createSshLegacyRelayRouter({
+      targetId: this.targetId,
+      connection: () => this.currentConnection,
+      clientInstanceId: this.ptyConsumerClientInstanceId,
+      sink: {
+        data: (payload) =>
+          void acceptSshPtyOutputData({
+            id: payload.id,
+            data: payload.data,
+            providerGeneration: payload.providerGeneration,
+            ptyIncarnation: payload.ptyIncarnation,
+            rawLength: payload.sequenceChars ?? payload.data.length,
+            transformed: payload.transformed === true,
+            ...(typeof payload.seq === 'number' ? { sequence: payload.seq } : {})
+          }).catch(() => {}),
+        exit: (payload) => void this.acceptPtyExit(payload).catch(() => {}),
+        replay: (payload) => this.forwardReattachReplay(payload.id, payload.data)
+      }
+    })
   }
 
   private activePtyConsumerOwner(): SshPtyConsumerOwnerState | null {
@@ -1709,6 +1749,13 @@ export class SshRelaySession {
     }
     // Why: capture the disposer so teardownProviders can release this handler and re-wiring can't double-register it.
     this.muxNotificationCleanup?.()
+    this.remoteInterruptCleanup?.()
+    this.remoteInterruptCleanup = bindRemoteClaudeInterruptReconciliation(
+      agentHookServer,
+      mux,
+      this.targetId,
+      () => this.mux === mux
+    )
     this.muxNotificationCleanup = mux.onNotification((method, params) => {
       if (method !== AGENT_HOOK_NOTIFICATION_METHOD) {
         return
@@ -1725,6 +1772,7 @@ export class SshRelaySession {
       agentHookServer.ingestRemote(
         {
           paneKey: envelope.paneKey,
+          hostTurnRevision: envelope.hostTurnRevision,
           launchToken: typeof envelope.launchToken === 'string' ? envelope.launchToken : undefined,
           tabId: typeof envelope.tabId === 'string' ? envelope.tabId : undefined,
           worktreeId: typeof envelope.worktreeId === 'string' ? envelope.worktreeId : undefined,
@@ -1808,6 +1856,8 @@ export class SshRelaySession {
     this.leavePlainSshMode()
     this.muxNotificationCleanup?.()
     this.muxNotificationCleanup = null
+    this.remoteInterruptCleanup?.()
+    this.remoteInterruptCleanup = null
     for (const cleanup of this.ptyRecoveryNotificationCleanups) {
       cleanup()
     }
@@ -2787,6 +2837,29 @@ export class SshRelaySession {
       if (!shouldContinue()) {
         return
       }
+      if (await isReattachHeldByPreviousRelay(this.targetId, error)) {
+        const routed = await this.reattachThroughPreviousRelay({
+          ptyProvider,
+          ptyId,
+          appPtyId,
+          expected: expectedIdentityByPtyId.get(ptyId),
+          lease: activeLeaseByPtyId.get(ptyId),
+          attachedLeaseIds,
+          shouldContinue
+        })
+        if (!routed) {
+          // Same as an exhausted reattach: the PTY is unverifiable, kept, and left for recovery.
+          pendingReattach.restoreRequired = 'reattachAttemptsExhausted'
+          this.wakeRecovery(pendingReattach)
+          console.warn(
+            `[ssh-relay-session] Keeping PTY ${ptyId} for ${this.targetId}: an older Orca relay on this host may still run it`
+          )
+        }
+        return
+      }
+      if (!shouldContinue()) {
+        return
+      }
       this.handlePtyReattachFailure(ptyId, appPtyId, pendingReattach, error)
     } finally {
       recoveryActivationLease?.retire()
@@ -2987,6 +3060,51 @@ export class SshRelaySession {
     restorePtyIncarnation(appPtyId, incarnationId)
     this.runtime?.onPtySpawned(appPtyId, incarnationId, { awaitsRegistration: false })
     return 'restored'
+  }
+
+  /** True when an older relay now serves the PTY, or the attempt stopped being current. */
+  private async reattachThroughPreviousRelay(args: {
+    ptyProvider: SshPtyProvider
+    ptyId: string
+    appPtyId: string
+    expected: ExpectedPtyIdentity | undefined
+    lease: SshPtyLease | undefined
+    attachedLeaseIds: Set<string>
+    shouldContinue: () => boolean
+  }): Promise<boolean> {
+    const { appPtyId, shouldContinue } = args
+    let result: SshPtyAttachResult | null
+    try {
+      result = await attachHeldPtyThroughPreviousRelay(args.ptyProvider, appPtyId, args.expected)
+    } catch (error) {
+      console.warn(
+        `[ssh-relay-session] Previous relay reattach failed for ${args.ptyId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      )
+      return false
+    }
+    if (!result || !shouldContinue()) {
+      return result !== null
+    }
+    if (result.incarnationId) {
+      const restored = await this.restoreReattachedPtyRuntime(
+        appPtyId,
+        result.incarnationId,
+        args.lease,
+        shouldContinue
+      )
+      if (restored !== 'restored') {
+        clearProviderPtyState(appPtyId)
+        deletePtyOwnership(appPtyId)
+        return true
+      }
+    } else {
+      setPtyOwnership(appPtyId, this.targetId)
+    }
+    args.attachedLeaseIds.add(args.ptyId)
+    this.forwardReattachReplay(appPtyId, result.replay ?? '')
+    return true
   }
 
   private async attachPtyWithRetry(

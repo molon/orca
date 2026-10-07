@@ -76,7 +76,8 @@ describe('transcript slots', () => {
         .map((slot) => slot.message.id)
 
     expect(trailing([text('u', 'go', 'user'), toolRun('a'), text('b', 'Done.')])).toEqual(['b'])
-    expect(trailing([text('u', 'go', 'user'), toolRun('a'), toolRun('b')])).toEqual(['b'])
+    // Two runs in a row draw as one, headed by the first.
+    expect(trailing([text('u', 'go', 'user'), toolRun('a'), toolRun('b')])).toEqual(['a'])
     expect(
       trailing([text('u', 'go', 'user'), toolRun('a'), text('r', 'hmm', 'reasoning')])
     ).toEqual(['a'])
@@ -467,21 +468,41 @@ describe('turn-owned grouping', () => {
     expect(slots[0]?.turnFolds).toBe(true)
   })
 
+  // A stored-only provider event draws nothing, so a disclosure over it would open onto nothing.
+  it('offers no disclosure when the only row besides the answer draws nothing', () => {
+    const wordless: NativeChatMessage = {
+      id: 'frame',
+      role: 'system',
+      blocks: [
+        {
+          type: 'text',
+          text: 'claude · message:system:memory_recall',
+          providerFrame: {
+            provider: 'claude',
+            kind: 'message:system:memory_recall',
+            payload: { head: '{}', byteLength: 2, digest: 'digest', truncated: false }
+          }
+        }
+      ],
+      timestamp: 1,
+      source: 'transcript'
+    }
+    const slots = build([text('A', 'go', 'user'), wordless, text('answer', 'Done.')], {
+      turnKeys: ['A', 'A', 'A'],
+      turnStatuses: { active: null, completedByTurn: { A: settled } }
+    })
+    expect(slots.map((slot) => slot.message.id)).toEqual(['A', 'answer'])
+    expect(slots[0]?.turnFolds).toBe(false)
+  })
+
   it('returns every row of the turn when the reader opens it', () => {
     const slots = build(midTurn, {
       turnKeys: ownedKeys,
       turnStatuses: { active: null, completedByTurn: { A: settled } },
       expandedTurnKeys: new Set(['A'])
     })
-    expect(slots.map((slot) => slot.message.id)).toEqual([
-      'A',
-      't1',
-      'B',
-      't2',
-      't3',
-      't4',
-      'answer'
-    ])
+    expect(slots.map((slot) => slot.message.id)).toEqual(['A', 't1', 'B', 't2', 'answer'])
+    expect(slots[3]?.workRun?.map((message) => message.id)).toEqual(['t2', 't3', 't4'])
   })
 
   it("anchors a provider-opened turn's bar above its first row", () => {
@@ -541,5 +562,20 @@ describe('turn-owned grouping', () => {
       ['t1', true],
       ['C', false]
     ])
+  })
+
+  it('skips only the open reasoning the live line discloses, and only while it does', () => {
+    const reasoning = (id: string, state: 'running' | 'completed'): NativeChatMessage => ({
+      ...text(id, 'Weighing two approaches', 'reasoning'),
+      state
+    })
+    const live = { turnKeys: ['A', 'A', 'A'], liveTurnKey: 'A', isWorking: true }
+    const rows = [text('A', 'go', 'user'), reasoning('r-1', 'running'), reasoning('r-2', 'running')]
+    const ids = (overrides: Partial<Parameters<typeof build>[1]>) =>
+      build(rows, { ...live, ...overrides }).map((slot) => slot.message.id)
+    expect(ids({ liveReasoningId: 'r-2' })).toEqual(['A', 'r-1'])
+    // Nothing discloses it (a prompt took the line, or it says something else): it draws.
+    expect(ids({ liveReasoningId: null })).toEqual(['A', 'r-1', 'r-2'])
+    expect(ids({})).toEqual(['A', 'r-1', 'r-2'])
   })
 })

@@ -197,6 +197,12 @@ jobs:
             pnpm-lock.yaml
             mobile/pnpm-lock.yaml
 
+      - name: Set up Bun for localization checks
+        if: needs.code_paths.outputs.static_analysis == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: config/.bun-version
+
       # Keep each check in its own log while sharing this runner.
       - name: Lint
         if: '!cancelled()'
@@ -349,6 +355,10 @@ jobs:
         if: needs.code_paths.outputs.static_analysis == 'true'
         run: pnpm run verify:rpc-params-catalog
 
+      - name: Verify the generated ACP protocol schema
+        if: needs.code_paths.outputs.static_analysis == 'true'
+        run: pnpm run verify:acp-protocol
+
       - name: Verify bundled skill guides
         if: needs.code_paths.outputs.static_analysis == 'true'
         run: pnpm run verify:bundled-skill-guides
@@ -440,8 +450,12 @@ jobs:
 
   git_compatibility:
     name: Git compatibility
-    needs: [code_paths]
-    if: needs.code_paths.outputs.git_compatibility == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.git_compatibility == 'true' &&
+      needs.preflight.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -509,8 +523,12 @@ jobs:
   # repair stops happening. Pinned because the binary is the thing expected to drift.
   codex_index_heal_contract:
     name: Codex index-heal contract
-    needs: [code_paths]
-    if: needs.code_paths.outputs.codex_index_heal_contract == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.codex_index_heal_contract == 'true' &&
+      needs.preflight.result == 'success'
     # Why ARM: @openai/codex ships @openai/codex-linux-arm64.
     runs-on: ubuntu-24.04-arm
     env:
@@ -561,6 +579,35 @@ jobs:
             pnpm exec vitest run --config config/vitest.config.ts \
             src/main/pty/codex-no-daemon-binary-contract.test.ts
 
+      # Why both pins and latest: Orca approves its managed-home hook entry with a hash
+      # Codex computes, so a release that changes it must redden here before users
+      # meet a review screen.
+      - name: Verify Codex hook file-entry contract (pinned)
+        env:
+          ORCA_CODEX_HOOK_CONTRACT_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          for install in codex-cli:"$CODEX_CLI_VERSION" codex-cli-no-daemon:"$CODEX_NO_DAEMON_CLI_VERSION"; do
+            ORCA_CODEX_HOOK_CONTRACT_BINARY="$RUNNER_TEMP/${install%%:*}/node_modules/.bin/codex" \
+              ORCA_CODEX_HOOK_CONTRACT_VERSION="${install#*:}" \
+              pnpm exec vitest run --config config/vitest.config.ts \
+              src/main/codex/codex-hook-file-entry-binary-contract.test.ts
+          done
+
+      - name: Install latest Codex CLI
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/codex-cli-latest" "@openai/codex@latest"
+
+      - name: Verify Codex hook file-entry contract (latest)
+        env:
+          ORCA_CODEX_HOOK_CONTRACT_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          ORCA_CODEX_HOOK_CONTRACT_BINARY="$RUNNER_TEMP/codex-cli-latest/node_modules/.bin/codex" \
+            pnpm exec vitest run --config config/vitest.config.ts \
+            src/main/codex/codex-hook-file-entry-binary-contract.test.ts
+
       # Why the no-daemon install: it is the newest pinned Codex, and its project
       # lookup decides whether a worktree launch stops at the trust prompt.
       - name: Verify Codex project-trust contract
@@ -575,8 +622,12 @@ jobs:
 
   xterm_patch_sync:
     name: xterm patch sync
-    needs: [code_paths]
-    if: needs.code_paths.outputs.xterm_patch_sync == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.xterm_patch_sync == 'true' &&
+      needs.preflight.result == 'success'
     # Why ARM: the patch check rebuilds 4 packages x 2 builds and byte-compares against the
     # checked-in bundles. Those were generated on Linux x64 and reproduce byte-for-byte on
     # darwin-arm64, so the output is neither host-arch nor host-OS dependent.
@@ -604,8 +655,12 @@ jobs:
 
   shell_contracts:
     name: shell contracts
-    needs: [code_paths]
-    if: needs.code_paths.outputs.shell_contracts == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.shell_contracts == 'true' &&
+      needs.preflight.result == 'success'
     # Why ARM: fish 4.x is published for noble/arm64 and zsh is in the arm64 archive.
     runs-on: ubuntu-24.04-arm
     # Why: this job's cost is almost entirely package download, and a stalled mirror has
@@ -758,8 +813,12 @@ jobs:
   # would pay for it on every shard to run one file in whichever shard it landed in.
   orcad_browser:
     name: orcad browser provider
-    needs: [code_paths]
-    if: needs.code_paths.outputs.orcad_browser == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.orcad_browser == 'true' &&
+      needs.preflight.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -811,7 +870,7 @@ jobs:
       # in this job loads node-pty.
       - uses: ./.github/actions/install-node-dependencies
         with:
-          native-runtime: node
+          native-runtime: none
           cache-dependency-path: |
             pnpm-lock.yaml
             mobile/pnpm-lock.yaml
@@ -872,8 +931,12 @@ jobs:
 
   cross-version-wire:
     name: cross-version wire compatibility
-    needs: [code_paths]
-    if: needs.code_paths.outputs.cross-version-wire == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.cross-version-wire == 'true' &&
+      needs.preflight.result == 'success'
     # Why ARM: source-only: tagged checkout plus in-process vitest, no docker or browser.
     runs-on: ubuntu-24.04-arm
 
@@ -916,8 +979,12 @@ jobs:
 
   managed_hook_node18:
     name: managed hooks on Node 18
-    needs: [code_paths]
-    if: needs.code_paths.outputs.managed_hook_node18 == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.managed_hook_node18 == 'true' &&
+      needs.preflight.result == 'success'
     # Why ARM: Node 18 publishes linux-arm64; the per-platform runtime files are read as data.
     runs-on: ubuntu-24.04-arm
 
@@ -1000,6 +1067,7 @@ jobs:
           src/main/browser/browser-route-webrtc-egress.electron.test.ts
           src/main/browser/browser-route-h3-egress.electron.test.ts
           src/main/browser/browser-route-dns-prefetch.electron.test.ts
+          src/main/persistence/profile-state/profile-state-writer-stall.electron.test.ts
 
       # Restore independent fixtures during builds; keep native lifecycle probes serial.
       - uses: ./.github/actions/prepare-linux-package-fixture
@@ -1171,6 +1239,7 @@ jobs:
           src/main/browser/browser-route-webrtc-egress.electron.test.ts
           src/main/browser/browser-route-h3-egress.electron.test.ts
           src/main/browser/browser-route-dns-prefetch.electron.test.ts
+          src/main/persistence/profile-state/profile-state-writer-stall.electron.test.ts
           src/main/providers/windows-conpty-wide-char-duplication.node-pty.test.ts
           src/main/providers/pty-repaint-wide-char-buffer.node-pty.test.ts
           src/shared/child-process/windows-command-line.win32.test.ts
@@ -1192,7 +1261,6 @@ jobs:
           src/main/windows-live-tree-kill.win32.test.ts
           src/main/wsl/wsl-runner.test.ts
           src/main/wsl/wsl-guest-environment.test.ts
-          src/main/wsl/wsl-invocation-boundary.test.ts
           src/main/wsl/wsl-executable-path.win32.test.ts
           src/main/wsl/wsl-w1-w3-contract.test.ts
           src/shared/source-scan/source-tree-scan.test.ts
@@ -1201,6 +1269,7 @@ jobs:
           src/main/cursor/hook-service.test.ts
           src/main/orca-profiles/profile-index-store.test.ts
           src/main/startup/windows-install-dir-acl-repair.win32.test.ts
+          src/main/startup/windows-app-data-path.test.ts
           src/main/runtime/repo-worktree-admin-fingerprint.test.ts
           src/main/runtime/worktree-scan-admin-fingerprint-gate.test.ts
           src/shared/secure-file-fsync-flags.test.ts
@@ -1263,8 +1332,19 @@ jobs:
 
   e2e:
     name: e2e
-    needs: code_paths
-    if: needs.code_paths.outputs.e2e_should_run == 'true'
+    needs: [code_paths, preflight]
+    if: >-
+      !cancelled() &&
+      needs.code_paths.result == 'success' &&
+      needs.code_paths.outputs.e2e_should_run == 'true' &&
+      (
+        needs.preflight.result == 'success' ||
+        (
+          needs.preflight.result == 'skipped' &&
+          needs.code_paths.outputs.static_analysis == 'false' &&
+          needs.code_paths.outputs.typecheck == 'false'
+        )
+      )
     # Why: reusable e2e.yml only checkouts, builds, and uploads artifacts.
     permissions:
       contents: read
